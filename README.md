@@ -99,6 +99,12 @@ beli 26rb". Bot cocokin ke katalog, tunjukin harga lama → baru buat
 dikonfirmasi, begitu di-OK langsung keupdate di tab PriceList Google
 Sheets. Boleh beberapa produk sekaligus dalam 1 pesan.
 
+**Order-nya gak jadi / mau dihapus total?** Bilang "hapus order Grandia
+Hotel" atau "batalin invoice INV-20260828-001" -- bot nanya konfirmasi
+dulu (nunjukin nama customer & totalnya), begitu di-OK order ditandai
+*Batal* (datanya tetep ada di Sheets buat histori, tapi otomatis keluar
+dari perhitungan piutang).
+
 ## 7. Command Bot (opsional, buat yang mau lebih pasti/cepat)
 
 | Command | Fungsi |

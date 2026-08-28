@@ -55,6 +55,13 @@ def _sheets():
     return get_sheets_client()
 
 
+_PENDING_KEYS = ("pending_order", "pending_po", "pending_edit", "pending_price_update", "pending_cancel")
+
+
+def _has_pending(context):
+    return any(context.user_data.get(k) for k in _PENDING_KEYS)
+
+
 async def _send_text(update, text, reply_markup=None):
     await update.effective_message.reply_text(
         text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup
@@ -156,11 +163,17 @@ siapa aja masih ada", "piutang berapa sih", "kas bulan ini gimana",
 sendiri.
 
 *Salah ketik pas bikin order?* Tinggal chat lagi abis invoice muncul,
-misal "edit Grandia Hotel" (kalau nama customernya salah) atau "alamatnya
-salah, harusnya Jl. Melati No. 5" -- bot bakal nanya konfirmasi dulu,
-begitu di-OK invoice & surat jalannya otomatis dicetak ulang. Default-nya
-ngedit order yang PALING BARU; kalau mau invoice lain, sebutin nomor
-invoice-nya, misal "invoice INV-20260828-001 no HP-nya ganti 08123456789".
+misal "edit Grandia Hotel" (kalau nama customernya salah), "alamatnya
+salah, harusnya Jl. Melati No. 5", atau "qty-nya jadi 25 pack" -- bot
+bakal nanya konfirmasi dulu, begitu di-OK invoice & surat jalannya
+otomatis dicetak ulang. Default-nya ngedit order yang PALING BARU; kalau
+mau invoice lain, sebutin nomor invoice-nya, misal "invoice
+INV-20260828-001 no HP-nya ganti 08123456789".
+
+*Order-nya gak jadi / mau dihapus total?* Bilang aja "hapus order Grandia
+Hotel" atau "batalin invoice INV-20260828-001" -- bot nanya konfirmasi
+dulu, begitu di-OK order ditandai Batal (datanya tetep ada buat histori,
+tapi otomatis keluar dari piutang).
 
 *Mau update harga jual/beli produk?* Tinggal bilang aja, misal "harga
 tulip naik jadi 17000" atau "update harga TUL-01 jadi 16500" -- bot
@@ -212,6 +225,7 @@ async def batal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("pending_po", None)
     context.user_data.pop("pending_edit", None)
     context.user_data.pop("pending_price_update", None)
+    context.user_data.pop("pending_cancel", None)
     context.user_data.pop("awaiting", None)
     await update.effective_message.reply_text("Oke, dibatalin.")
 
@@ -456,8 +470,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _process_po_text(update, context, text)
         return
 
-    if (context.user_data.get("pending_order") or context.user_data.get("pending_po")
-            or context.user_data.get("pending_edit") or context.user_data.get("pending_price_update")):
+    if _has_pending(context):
         await update.effective_message.reply_text(
             "Masih ada order/PO/perubahan yang nunggu konfirmasi di atas. Klik tombolnya dulu, atau /batal buat batalin."
         )
@@ -508,6 +521,8 @@ async def _route_text(update, context, text):
         await _do_suratjalan_lookup(update, context, target)
     elif intent == "edit_order":
         await _do_edit_order(update, context, target, text)
+    elif intent == "batal_order":
+        await _do_cancel_order(update, context, target)
     elif intent == "update_harga":
         await _do_update_harga(update, context, text)
     elif intent == "po":
@@ -572,12 +587,17 @@ async def _do_edit_order(update, context, target, text):
         await update.effective_message.reply_text(f"Invoice {no_invoice} gak ketemu.")
         return
     first = rows[0]
+    items_desc = "\n".join(
+        f"  - {r.get('Item_Code','')} | {r.get('Nama_Item','')} | qty {r.get('Qty','')} {r.get('Satuan','')}"
+        for r in rows
+    )
     current_desc = (
         f"No Invoice: {no_invoice}\n"
         f"Nama Customer: {first.get('Nama_Customer', '')}\n"
         f"No HP: {first.get('No_HP', '')}\n"
         f"Alamat: {first.get('Alamat', '')}\n"
-        f"Metode: {first.get('Metode', '')}"
+        f"Metode: {first.get('Metode', '')}\n"
+        f"ITEM DI ORDER INI:\n{items_desc}"
     )
     try:
         corr = parse_order_correction(text, current_desc)
@@ -586,24 +606,102 @@ async def _do_edit_order(update, context, target, text):
         await update.effective_message.reply_text(f"Waduh, gagal baca koreksinya: {e}")
         return
 
-    updates = {k: (v or "").strip() for k, v in corr.items() if (v or "").strip()}
-    if not updates:
+    header_fields = {"nama_customer", "no_hp", "alamat", "metode"}
+    updates = {
+        k: (v or "").strip() for k, v in corr.items()
+        if k in header_fields and (v or "").strip()
+    }
+
+    item_updates = []
+    rows_by_code = {str(r.get("Item_Code", "")).strip().upper(): r for r in rows}
+    for it in corr.get("items", []) or []:
+        code = (it.get("item_code") or "").strip()
+        qty_baru = it.get("qty_baru")
+        if not code or qty_baru in (None, "", 0):
+            continue
+        cur_row = rows_by_code.get(code.upper())
+        if not cur_row:
+            continue
+        item_updates.append({
+            "item_code": code,
+            "nama": cur_row.get("Nama_Item", code),
+            "satuan": cur_row.get("Satuan", ""),
+            "qty_lama": cur_row.get("Qty", ""),
+            "qty_baru": qty_baru,
+        })
+
+    if not updates and not item_updates:
         await update.effective_message.reply_text(
-            "Gak nangkep bagian mana yang mau diganti. Coba lebih jelas, misal: "
-            "\"ganti nama customer jadi Grandia Hotel\"."
+            "Gak nangkep bagian mana yang mau diganti (atau nilainya udah sama "
+            "kayak yang kesimpen sekarang). Coba lebih jelas, misal: \"ganti "
+            "nama customer jadi Grandia Hotel\" atau \"qty tulip jadi 25 pack\"."
         )
         return
 
-    context.user_data["pending_edit"] = {"no_invoice": no_invoice, "updates": updates}
+    context.user_data["pending_edit"] = {
+        "no_invoice": no_invoice, "updates": updates, "item_updates": item_updates,
+    }
     lines = [f"*Mau diganti di {no_invoice}:*", ""]
     for k, v in updates.items():
         lama = first.get(_EDIT_FIELD_COLUMN[k], "") or "-"
         lines.append(f"• {_EDIT_FIELD_LABEL[k]}: {lama} → *{v}*")
+    for iu in item_updates:
+        lines.append(f"• Qty {iu['nama']}: {iu['qty_lama']} {iu['satuan']} → *{iu['qty_baru']} {iu['satuan']}*")
     kb = InlineKeyboardMarkup([[
         InlineKeyboardButton("✅ Simpan Perubahan", callback_data="editorder_confirm"),
         InlineKeyboardButton("❌ Batal", callback_data="editorder_cancel"),
     ]])
     await _send_text(update, "\n".join(lines), reply_markup=kb)
+
+
+async def _do_cancel_order(update, context, target):
+    sheets = _sheets()
+
+    no_invoice = None
+    if target and target.upper().startswith(config.INVOICE_PREFIX):
+        no_invoice = target
+    if not no_invoice:
+        no_invoice = context.user_data.get("last_invoice")
+    if not no_invoice and target:
+        no_invoice = sheets.get_latest_invoice_for_customer(target)
+    if not no_invoice:
+        await update.effective_message.reply_text(
+            "Order/invoice yang mana yang mau dibatalin? Sebutin nomor invoice-nya "
+            "atau nama customernya."
+        )
+        return
+
+    rows = sheets.get_order_items(no_invoice)
+    if not rows:
+        await update.effective_message.reply_text(f"Invoice {no_invoice} gak ketemu.")
+        return
+    if str(rows[0].get("Status", "")) == "Batal":
+        await update.effective_message.reply_text(f"{no_invoice} udah dibatalin sebelumnya.")
+        return
+
+    total = 0.0
+    for r in rows:
+        try:
+            total += float(r.get("Subtotal", 0) or 0)
+        except ValueError:
+            pass
+    try:
+        total += float(rows[0].get("Ongkir", 0) or 0)
+    except ValueError:
+        pass
+
+    context.user_data["pending_cancel"] = no_invoice
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Ya, Batalin", callback_data="cancelorder_confirm"),
+        InlineKeyboardButton("❌ Jangan Dulu", callback_data="cancelorder_cancel"),
+    ]])
+    await _send_text(
+        update,
+        f"Yakin mau batalin *{no_invoice}* ({rows[0].get('Nama_Customer', '-')}, "
+        f"total {rupiah(total)})? Order ditandai *Batal* (datanya tetep ada buat "
+        "histori, tapi otomatis keluar dari piutang).",
+        reply_markup=kb,
+    )
 
 
 async def _do_update_harga(update, context, text):
@@ -666,8 +764,7 @@ async def _do_update_harga(update, context, text):
 
 @owner_only
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if (context.user_data.get("pending_order") or context.user_data.get("pending_po")
-            or context.user_data.get("pending_edit") or context.user_data.get("pending_price_update")):
+    if _has_pending(context):
         await update.effective_message.reply_text(
             "Masih ada order/PO/perubahan yang nunggu konfirmasi. Klik tombolnya dulu, atau /batal buat batalin."
         )
@@ -729,17 +826,40 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("Perubahannya udah gak ada / kadaluarsa, coba ulang.")
             return
         sheets = _sheets()
-        ok = sheets.edit_order_header(pending["no_invoice"], pending["updates"])
-        if not ok:
-            await query.edit_message_text(f"Invoice {pending['no_invoice']} gak ketemu lagi, mungkin udah berubah.")
+        no_invoice = pending["no_invoice"]
+        found = bool(sheets.get_order_items(no_invoice))
+        if not found:
+            await query.edit_message_text(f"Invoice {no_invoice} gak ketemu lagi, mungkin udah berubah.")
             return
-        context.user_data["last_invoice"] = pending["no_invoice"]
+        if pending.get("updates"):
+            sheets.edit_order_header(no_invoice, pending["updates"])
+        for iu in pending.get("item_updates", []):
+            sheets.edit_order_item_qty(no_invoice, iu["item_code"], iu["qty_baru"])
+        context.user_data["last_invoice"] = no_invoice
         await query.edit_message_text(
-            f"✅ {pending['no_invoice']} udah diupdate. Lagi bikin ulang invoice & surat jalan...",
+            f"✅ {no_invoice} udah diupdate. Lagi bikin ulang invoice & surat jalan...",
             parse_mode=ParseMode.MARKDOWN,
         )
-        await _kirim_invoice(update, context, pending["no_invoice"])
-        await _kirim_surat_jalan(update, context, pending["no_invoice"])
+        await _kirim_invoice(update, context, no_invoice)
+        await _kirim_surat_jalan(update, context, no_invoice)
+        return
+
+    if data == "cancelorder_cancel":
+        context.user_data.pop("pending_cancel", None)
+        await query.edit_message_text("Oke, gak jadi dibatalin.")
+        return
+
+    if data == "cancelorder_confirm":
+        no_invoice = context.user_data.pop("pending_cancel", None)
+        if not no_invoice:
+            await query.edit_message_text("Udah gak ada order yang nunggu dibatalin, coba ulang.")
+            return
+        sheets = _sheets()
+        ok = sheets.cancel_order(no_invoice)
+        if not ok:
+            await query.edit_message_text(f"Invoice {no_invoice} gak ketemu lagi.")
+            return
+        await query.edit_message_text(f"✅ {no_invoice} udah ditandai *Batal*.", parse_mode=ParseMode.MARKDOWN)
         return
 
     if data == "priceupdate_cancel":

@@ -400,6 +400,60 @@ class SheetsClient:
             self.add_customer_if_new(updates["nama_customer"].strip())
         return True
 
+    def edit_order_item_qty(self, no_invoice, item_code, qty_baru):
+        """Ganti Qty (dan Subtotal ngikut, dihitung ulang dari Harga_Satuan
+        yang udah ada) buat 1 item di dalam order tertentu. Balikin True
+        kalau baris item ketemu & keupdate, False kalau enggak."""
+        ws = self._ws(config.SHEET_ORDERS)
+        headers = ws.row_values(1)
+        col_invoice = headers.index("No_Invoice") + 1
+        col_item_code = headers.index("Item_Code") + 1
+        col_qty = headers.index("Qty") + 1
+        col_harga = headers.index("Harga_Satuan") + 1
+        col_subtotal = headers.index("Subtotal") + 1
+        target_code = (item_code or "").strip().upper()
+        if not target_code:
+            return False
+        all_values = ws.get_all_values()
+        for idx, row in enumerate(all_values[1:], start=2):
+            if len(row) < col_item_code:
+                continue
+            if row[col_invoice - 1] != no_invoice:
+                continue
+            if row[col_item_code - 1].strip().upper() != target_code:
+                continue
+            try:
+                harga = float(row[col_harga - 1] or 0)
+            except ValueError:
+                harga = 0
+            try:
+                qty_val = float(qty_baru)
+            except (TypeError, ValueError):
+                return False
+            ws.update_cell(idx, col_qty, qty_val)
+            ws.update_cell(idx, col_subtotal, harga * qty_val)
+            return True
+        return False
+
+    def cancel_order(self, no_invoice):
+        """Tandai semua baris dengan No_Invoice ini Status='Batal' -- order
+        DIHAPUS/DIBATALIN secara logis (datanya tetep ada buat histori,
+        tapi otomatis keluar dari piutang karena get_pending_orders cuma
+        ngitung yang Status-nya Pending). Balikin True kalau ketemu, False
+        kalau enggak."""
+        ws = self._ws(config.SHEET_ORDERS)
+        headers = ws.row_values(1)
+        col_invoice = headers.index("No_Invoice") + 1
+        col_status = headers.index("Status") + 1
+        all_values = ws.get_all_values()
+        found = False
+        for idx, row in enumerate(all_values[1:], start=2):
+            if len(row) < col_invoice or row[col_invoice - 1] != no_invoice:
+                continue
+            found = True
+            ws.update_cell(idx, col_status, "Batal")
+        return found
+
     def get_pending_orders(self):
         return [r for r in self.get_all_orders() if str(r.get("Status", "")) == "Pending"]
 

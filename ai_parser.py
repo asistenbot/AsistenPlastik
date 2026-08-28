@@ -202,6 +202,12 @@ Daftar intent yang valid:
   yang dibeli sama sekali. Kalau pesannya cuma nyebut 1-2 kata nama orang
   atau tempat tanpa daftar barang (misal cuma "edit Grandia Hotel"), itu
   edit_order, BUKAN order.
+- "batal_order" -- admin mau BATALIN/HAPUS SELURUH order/invoice yang SUDAH
+  kesimpen (misal order test yang mau dibuang, atau customer batal jadi
+  beli), BUKAN betulin satu-dua data yang salah ketik (itu edit_order).
+  Ciri-cirinya: kata "hapus", "batalin", "cancel", "gak jadi", diikuti
+  referensi ke order/invoice/customer tertentu, TANPA nyebut field
+  spesifik apa yang mau diganti isinya.
 - "update_harga" -- admin mau UBAH HARGA JUAL dan/atau HARGA BELI produk di
   katalog/PriceList (bukan order dari customer, bukan PO ke supplier).
   Ciri-cirinya: nyebut nama/kode barang + harga/angka rupiah, pakai kata
@@ -214,9 +220,10 @@ Daftar intent yang valid:
 Kalau ragu antara "order" dan intent lain, PILIH "order" (lebih aman salah
 nanya balik daripada order customer keskip) -- KECUALI kalau pesannya
 diawali kata edit/ganti/betulin/koreksi dan gak nyebut barang (itu
-edit_order), atau nyebut barang + harga TANPA nama customer/qty pembelian
-(itu update_harga). Kalau pesan cuma sapaan atau gak jelas sama sekali,
-pilih "lainnya".
+edit_order), diawali hapus/batalin/cancel tanpa nyebut field spesifik
+(itu batal_order), atau nyebut barang + harga TANPA nama customer/qty
+pembelian (itu update_harga). Kalau pesan cuma sapaan atau gak jelas sama
+sekali, pilih "lainnya".
 """
 
 
@@ -235,7 +242,10 @@ def classify_intent(text):
 
 EDIT_ORDER_SYSTEM_PROMPT = """Kamu asisten admin toko plastik "{business_name}".
 Admin barusan mau NGOREKSI/BETULIN salah satu data di order yang SUDAH
-kesimpen (bukan bikin order baru). Data order yang mau dikoreksi saat ini:
+kesimpen (bukan bikin order baru, bukan batalin/hapus order -- kalau
+instruksinya "hapus"/"batalin"/"cancel" TANPA nyebut field yang mau
+diganti, itu BUKAN urusan kamu, biarin semua field kosong). Data order
+yang mau dikoreksi saat ini:
 
 {current}
 
@@ -245,14 +255,28 @@ ini, tanpa teks lain:
   "nama_customer": "nilai baru kalau nama customer mau diganti, string kosong kalau TIDAK diganti",
   "no_hp": "nilai baru kalau no HP mau diganti, string kosong kalau TIDAK diganti",
   "alamat": "nilai baru kalau alamat mau diganti, string kosong kalau TIDAK diganti",
-  "metode": "'Kirim' atau 'Ambil' kalau metode mau diganti, string kosong kalau TIDAK diganti"
+  "metode": "'Kirim' atau 'Ambil' kalau metode mau diganti, string kosong kalau TIDAK diganti",
+  "items": [
+    {{"item_code": "kode item (dari daftar ITEM DI ORDER INI di atas) yang qty-nya mau diganti", "qty_baru": angka qty baru}}
+  ]
 }}
 
-Penting: kalau instruksinya cuma nyebut satu-dua kata nama/tempat tanpa
-penjelasan lain (misal admin cuma ngetik "edit Grandia Hotel"), itu HAMPIR
-PASTI maksudnya mau ganti NAMA CUSTOMER jadi nama itu -- bukan field lain.
-Jangan mengarang perubahan buat field yang gak disebut sama sekali,
-biarin string kosong.
+Aturan penting:
+- Kalau instruksinya cuma nyebut satu-dua kata nama/tempat tanpa penjelasan
+  lain (misal admin cuma ngetik "edit Grandia Hotel"), itu HAMPIR PASTI
+  maksudnya mau ganti NAMA CUSTOMER jadi nama itu -- bukan field lain.
+- JANGAN mengarang perubahan buat field yang gak disebut sama sekali,
+  biarin string kosong / array kosong.
+- KHUSUS nama_customer: kalau nilai baru yang dimaksud admin SAMA PERSIS
+  (case-insensitive) dengan nama customer yang udah kesimpen sekarang,
+  berarti gak ada yang perlu diubah -- biarin nama_customer string kosong,
+  JANGAN balikin nilai yang sama sebagai "perubahan".
+- "items" cuma diisi kalau admin EKSPLISIT minta ganti QTY salah satu
+  barang yang UDAH ada di order ini (misal "qty jadi 25kg", "yang tulip
+  jadi 10 pack aja"). Kalau order cuma punya 1 macam barang dan admin
+  nyebut qty baru tanpa nama barang, itu barang itu yang dimaksud. JANGAN
+  nambah barang baru atau hapus barang yang gak disebut -- kalau gak ada
+  permintaan ganti qty, biarin items jadi array kosong [].
 """
 
 

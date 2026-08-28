@@ -83,6 +83,22 @@ santai kayak "utang ke siapa aja", "si Grandia udah bayar belum",
 ragu / gagal nebak, default-nya tetep dianggap ORDER customer (paling
 aman, biar order gak kelewat).
 
+**Salah ketik pas bikin order?** Tinggal chat lagi, misal "edit Grandia
+Hotel" (kalau nama customernya salah ketik) atau "alamatnya salah, harusnya
+Jl. Melati No. 5". Default-nya ngedit order yang PALING BARU dibikin di
+chat itu; kalau mau invoice lain, sebutin nomor invoice-nya. Bot bakal
+nunjukin dulu apa yang mau diganti + tombol konfirmasi sebelum kesimpen --
+begitu di-OK, invoice & surat jalannya otomatis dicetak ulang dengan data
+yang baru. Fitur ini cuma buat betulin data header (nama/HP/alamat/metode),
+bukan buat ganti barang/qty -- kalau barangnya salah, batalin aja ordernya
+sebelum dikonfirmasi pertama kali.
+
+**Mau update harga jual/beli produk di katalog?** Tinggal bilang, misal
+"harga tulip naik jadi 17000" atau "PP bening 40x60 sekarang 30rb, harga
+beli 26rb". Bot cocokin ke katalog, tunjukin harga lama → baru buat
+dikonfirmasi, begitu di-OK langsung keupdate di tab PriceList Google
+Sheets. Boleh beberapa produk sekaligus dalam 1 pesan.
+
 ## 7. Command Bot (opsional, buat yang mau lebih pasti/cepat)
 
 | Command | Fungsi |

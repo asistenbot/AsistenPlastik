@@ -188,6 +188,32 @@ class SheetsClient:
             return candidates[0]
         return None
 
+    def update_price(self, item_code, harga_jual=None, harga_beli=None):
+        """Update Harga_Jual dan/atau Harga_Beli buat 1 produk di PriceList
+        (dicari by Item_Code, persis). Cuma field yang dikasih (bukan None)
+        yang diupdate. Balikin True kalau item_code ketemu & keupdate,
+        False kalau item_code gak ada di katalog."""
+        ws = self._ws(config.SHEET_PRICELIST)
+        headers = ws.row_values(1)
+        col_code = headers.index("Item_Code") + 1
+        col_jual = headers.index("Harga_Jual") + 1
+        col_beli = headers.index("Harga_Beli") + 1
+        target = (item_code or "").strip().upper()
+        if not target:
+            return False
+        all_values = ws.get_all_values()
+        for idx, row in enumerate(all_values[1:], start=2):
+            if len(row) < col_code:
+                continue
+            if row[col_code - 1].strip().upper() != target:
+                continue
+            if harga_jual is not None:
+                ws.update_cell(idx, col_jual, harga_jual)
+            if harga_beli is not None:
+                ws.update_cell(idx, col_beli, harga_beli)
+            return True
+        return False
+
     def get_pricelist_text(self):
         rows = self.get_price_list()
         by_kategori = {}
@@ -330,6 +356,49 @@ class SheetsClient:
         for r, c, v in updates:
             ws.update_cell(r, c, v)
         return total
+
+    def edit_order_header(self, no_invoice, updates):
+        """Betulin data header order yang SUDAH kesimpen (nama customer, no
+        HP, alamat, dan/atau metode) -- BUKAN item/qty/harga. `updates` dict
+        subset dari {nama_customer, no_hp, alamat, metode} -> nilai baru,
+        cuma field yang ada isinya yang diupdate. Update semua baris yang
+        share No_Invoice ini (1 order = beberapa baris, 1 per item).
+        Balikin True kalau invoice ketemu & keupdate, False kalau enggak
+        ketemu."""
+        field_to_col = {
+            "nama_customer": "Nama_Customer",
+            "no_hp": "No_HP",
+            "alamat": "Alamat",
+            "metode": "Metode",
+        }
+        ws = self._ws(config.SHEET_ORDERS)
+        headers = ws.row_values(1)
+        col_invoice = headers.index("No_Invoice") + 1
+        col_map = {}
+        for key, col_name in field_to_col.items():
+            val = (updates.get(key) or "").strip()
+            if val:
+                col_map[key] = (headers.index(col_name) + 1, val)
+
+        if not col_map:
+            return False
+
+        all_values = ws.get_all_values()
+        found = False
+        cell_updates = []
+        for idx, row in enumerate(all_values[1:], start=2):
+            if len(row) < col_invoice or row[col_invoice - 1] != no_invoice:
+                continue
+            found = True
+            for col, val in col_map.values():
+                cell_updates.append((idx, col, val))
+        if not found:
+            return False
+        for r, c, v in cell_updates:
+            ws.update_cell(r, c, v)
+        if "nama_customer" in updates and (updates.get("nama_customer") or "").strip():
+            self.add_customer_if_new(updates["nama_customer"].strip())
+        return True
 
     def get_pending_orders(self):
         return [r for r in self.get_all_orders() if str(r.get("Status", "")) == "Pending"]

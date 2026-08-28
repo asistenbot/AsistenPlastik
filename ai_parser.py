@@ -195,11 +195,28 @@ Daftar intent yang valid:
 - "bayar_utang" -- bilang udah bayar/cicil ke supplier tertentu
 - "lihat_invoice" -- minta liat/cetak ulang invoice customer tertentu
 - "lihat_suratjalan" -- minta liat/cetak ulang surat jalan customer tertentu
+- "edit_order" -- admin mau NGOREKSI/BETULIN data order/invoice yang SUDAH
+  kesimpen (misal salah ketik nama customer, salah alamat, salah no HP),
+  BUKAN bikin order baru. Ciri-cirinya: diawali kata "edit", "ganti",
+  "betulin", "koreksi", "salah tadi", dsb, dan TIDAK nyebutin barang/qty
+  yang dibeli sama sekali. Kalau pesannya cuma nyebut 1-2 kata nama orang
+  atau tempat tanpa daftar barang (misal cuma "edit Grandia Hotel"), itu
+  edit_order, BUKAN order.
+- "update_harga" -- admin mau UBAH HARGA JUAL dan/atau HARGA BELI produk di
+  katalog/PriceList (bukan order dari customer, bukan PO ke supplier).
+  Ciri-cirinya: nyebut nama/kode barang + harga/angka rupiah, pakai kata
+  kayak "harga", "naikin", "turunin", "sekarang", "ganti harga", "update
+  harga", dan TIDAK nyebut nama customer atau supplier yang lagi
+  transaksi. Contoh: "harga tulip naik jadi 17000", "PP bening 40x60
+  sekarang 30rb", "update harga TUL-01 jadi 16500".
 - "lainnya" -- basa-basi / gak jelas maksudnya / gak masuk kategori manapun
 
 Kalau ragu antara "order" dan intent lain, PILIH "order" (lebih aman salah
-nanya balik daripada order customer keskip). Kalau pesan cuma sapaan atau
-gak jelas sama sekali, pilih "lainnya".
+nanya balik daripada order customer keskip) -- KECUALI kalau pesannya
+diawali kata edit/ganti/betulin/koreksi dan gak nyebut barang (itu
+edit_order), atau nyebut barang + harga TANPA nama customer/qty pembelian
+(itu update_harga). Kalau pesan cuma sapaan atau gak jelas sama sekali,
+pilih "lainnya".
 """
 
 
@@ -209,6 +226,93 @@ def classify_intent(text):
     resp = client.messages.create(
         model=config.CLAUDE_MODEL,
         max_tokens=300,
+        system=prompt,
+        messages=[{"role": "user", "content": text}],
+    )
+    raw = "".join(block.text for block in resp.content if block.type == "text")
+    return _extract_json(raw)
+
+
+EDIT_ORDER_SYSTEM_PROMPT = """Kamu asisten admin toko plastik "{business_name}".
+Admin barusan mau NGOREKSI/BETULIN salah satu data di order yang SUDAH
+kesimpen (bukan bikin order baru). Data order yang mau dikoreksi saat ini:
+
+{current}
+
+Baca instruksi koreksi dari admin, terus balikin HANYA JSON persis struktur
+ini, tanpa teks lain:
+{{
+  "nama_customer": "nilai baru kalau nama customer mau diganti, string kosong kalau TIDAK diganti",
+  "no_hp": "nilai baru kalau no HP mau diganti, string kosong kalau TIDAK diganti",
+  "alamat": "nilai baru kalau alamat mau diganti, string kosong kalau TIDAK diganti",
+  "metode": "'Kirim' atau 'Ambil' kalau metode mau diganti, string kosong kalau TIDAK diganti"
+}}
+
+Penting: kalau instruksinya cuma nyebut satu-dua kata nama/tempat tanpa
+penjelasan lain (misal admin cuma ngetik "edit Grandia Hotel"), itu HAMPIR
+PASTI maksudnya mau ganti NAMA CUSTOMER jadi nama itu -- bukan field lain.
+Jangan mengarang perubahan buat field yang gak disebut sama sekali,
+biarin string kosong.
+"""
+
+
+def parse_order_correction(instruction_text, current_order_desc):
+    prompt = EDIT_ORDER_SYSTEM_PROMPT.format(
+        business_name=config.BUSINESS_NAME,
+        current=current_order_desc,
+    )
+    client = _get_client()
+    resp = client.messages.create(
+        model=config.CLAUDE_MODEL,
+        max_tokens=300,
+        system=prompt,
+        messages=[{"role": "user", "content": instruction_text}],
+    )
+    raw = "".join(block.text for block in resp.content if block.type == "text")
+    return _extract_json(raw)
+
+
+PRICE_UPDATE_SYSTEM_PROMPT = """Kamu asisten admin toko plastik "{business_name}".
+Admin mau UPDATE HARGA JUAL dan/atau HARGA BELI satu atau beberapa produk di
+katalog (PriceList) -- BUKAN order dari customer, BUKAN PO ke supplier.
+
+KATALOG PRODUK SAAT INI:
+{catalog}
+
+Baca instruksi dari admin, balikin HANYA JSON persis struktur ini, tanpa
+teks lain:
+{{
+  "items": [
+    {{
+      "item_code": "KODE_DARI_KATALOG kalau ketemu jelas, string kosong kalau item gak ketemu/ambigu",
+      "nama_disebut": "nama barang persis seperti disebut admin",
+      "harga_jual": angka harga jual BARU, 0 kalau harga jual TIDAK disebut/diubah,
+      "harga_beli": angka harga beli BARU, 0 kalau harga beli TIDAK disebut/diubah
+    }}
+  ]
+}}
+
+Aturan:
+- Kalau admin cuma nyebut satu angka harga tanpa bilang itu harga
+  beli/modal/dari supplier, anggap itu HARGA JUAL (harga ke customer).
+- Boleh lebih dari 1 item dalam 1 pesan (misal admin bilang "tulip sama
+  sampah naik semua 2000").
+- Kalau nama barang yang disebut gak ketemu jelas di katalog (atau
+  ambigu, bisa lebih dari 1 kandidat), tetap masukin ke items dengan
+  item_code kosong ("") biar admin dikasih tau gak ketemu -- jangan
+  mengarang item_code.
+"""
+
+
+def parse_price_update(text, price_list):
+    prompt = PRICE_UPDATE_SYSTEM_PROMPT.format(
+        business_name=config.BUSINESS_NAME,
+        catalog=_catalog_context(price_list),
+    )
+    client = _get_client()
+    resp = client.messages.create(
+        model=config.CLAUDE_MODEL,
+        max_tokens=1000,
         system=prompt,
         messages=[{"role": "user", "content": text}],
     )

@@ -206,7 +206,7 @@ def generate_invoice_image(no_invoice, nama_customer, no_hp, alamat, metode, ite
         font=F_BOLD(16), fill=INK,
     )
     y += 32
-    draw.text((MARGIN, y), "Terima kasih sudah berbelanja — Anugerah Sejahtera Sentosa", font=F_SMALL(13), fill=MUTED)
+    draw.text((MARGIN, y), "Terima Kasih", font=F_SMALL(13), fill=MUTED)
 
     buf = io.BytesIO()
     img.save(buf, format="PNG")

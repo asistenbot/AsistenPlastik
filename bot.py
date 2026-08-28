@@ -21,7 +21,10 @@ from telegram.ext import (
 
 import config
 import documents
-from ai_parser import parse_order_text, parse_order_image, parse_po_text, classify_intent
+from ai_parser import (
+    parse_order_text, parse_order_image, parse_po_text, classify_intent,
+    parse_order_correction, parse_price_update,
+)
 from sheets_client import get_sheets_client
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -150,7 +153,21 @@ surat jalan otomatis, tinggal dikonfirmasi dulu.
 *Gak usah apal command!* Boleh langsung nanya santai kayak "utang ke
 siapa aja masih ada", "piutang berapa sih", "kas bulan ini gimana",
 "si Budi udah bayar", "bayar utang ke CV Sumber 500rb" -- bot bakal ngerti
-sendiri. Command di bawah ini cadangan aja kalau mau lebih pasti/cepat:
+sendiri.
+
+*Salah ketik pas bikin order?* Tinggal chat lagi abis invoice muncul,
+misal "edit Grandia Hotel" (kalau nama customernya salah) atau "alamatnya
+salah, harusnya Jl. Melati No. 5" -- bot bakal nanya konfirmasi dulu,
+begitu di-OK invoice & surat jalannya otomatis dicetak ulang. Default-nya
+ngedit order yang PALING BARU; kalau mau invoice lain, sebutin nomor
+invoice-nya, misal "invoice INV-20260828-001 no HP-nya ganti 08123456789".
+
+*Mau update harga jual/beli produk?* Tinggal bilang aja, misal "harga
+tulip naik jadi 17000" atau "update harga TUL-01 jadi 16500" -- bot
+nunjukin dulu harga lama → baru buat dikonfirmasi, begitu di-OK langsung
+keupdate di PriceList Google Sheets.
+
+Command di bawah ini cadangan aja kalau mau lebih pasti/cepat:
 /pricelist — lihat daftar harga produk
 /invoice <no invoice atau nama customer> — cetak ulang invoice
 /suratjalan <no invoice atau nama customer> — cetak ulang surat jalan
@@ -193,6 +210,8 @@ async def pricelist_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def batal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("pending_order", None)
     context.user_data.pop("pending_po", None)
+    context.user_data.pop("pending_edit", None)
+    context.user_data.pop("pending_price_update", None)
     context.user_data.pop("awaiting", None)
     await update.effective_message.reply_text("Oke, dibatalin.")
 
@@ -437,9 +456,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _process_po_text(update, context, text)
         return
 
-    if context.user_data.get("pending_order") or context.user_data.get("pending_po"):
+    if (context.user_data.get("pending_order") or context.user_data.get("pending_po")
+            or context.user_data.get("pending_edit") or context.user_data.get("pending_price_update")):
         await update.effective_message.reply_text(
-            "Masih ada order/PO yang nunggu konfirmasi di atas. Klik tombolnya dulu, atau /batal buat batalin."
+            "Masih ada order/PO/perubahan yang nunggu konfirmasi di atas. Klik tombolnya dulu, atau /batal buat batalin."
         )
         return
 
@@ -486,6 +506,10 @@ async def _route_text(update, context, text):
         await _do_invoice_lookup(update, context, target)
     elif intent == "lihat_suratjalan":
         await _do_suratjalan_lookup(update, context, target)
+    elif intent == "edit_order":
+        await _do_edit_order(update, context, target, text)
+    elif intent == "update_harga":
+        await _do_update_harga(update, context, text)
     elif intent == "po":
         await _process_po_text(update, context, text)
     elif intent == "lainnya":
@@ -515,11 +539,137 @@ async def _process_order_text(update, context, text):
     await _send_text(update, _order_preview_text(parsed), reply_markup=kb)
 
 
+_EDIT_FIELD_LABEL = {
+    "nama_customer": "Nama Customer", "no_hp": "No HP",
+    "alamat": "Alamat", "metode": "Metode",
+}
+_EDIT_FIELD_COLUMN = {
+    "nama_customer": "Nama_Customer", "no_hp": "No_HP",
+    "alamat": "Alamat", "metode": "Metode",
+}
+
+
+async def _do_edit_order(update, context, target, text):
+    sheets = _sheets()
+
+    no_invoice = None
+    if target and target.upper().startswith(config.INVOICE_PREFIX):
+        no_invoice = target
+    if not no_invoice:
+        no_invoice = context.user_data.get("last_invoice")
+    if not no_invoice and target:
+        no_invoice = sheets.get_latest_invoice_for_customer(target)
+    if not no_invoice:
+        await update.effective_message.reply_text(
+            "Order/invoice yang mana yang mau diedit? Sebutin nomor invoice-nya "
+            "atau nama customernya, contoh: \"invoice INV-20260828-001 nama "
+            "customernya salah, harusnya Grandia Hotel\"."
+        )
+        return
+
+    rows = sheets.get_order_items(no_invoice)
+    if not rows:
+        await update.effective_message.reply_text(f"Invoice {no_invoice} gak ketemu.")
+        return
+    first = rows[0]
+    current_desc = (
+        f"No Invoice: {no_invoice}\n"
+        f"Nama Customer: {first.get('Nama_Customer', '')}\n"
+        f"No HP: {first.get('No_HP', '')}\n"
+        f"Alamat: {first.get('Alamat', '')}\n"
+        f"Metode: {first.get('Metode', '')}"
+    )
+    try:
+        corr = parse_order_correction(text, current_desc)
+    except Exception as e:
+        logger.exception("gagal parse koreksi order")
+        await update.effective_message.reply_text(f"Waduh, gagal baca koreksinya: {e}")
+        return
+
+    updates = {k: (v or "").strip() for k, v in corr.items() if (v or "").strip()}
+    if not updates:
+        await update.effective_message.reply_text(
+            "Gak nangkep bagian mana yang mau diganti. Coba lebih jelas, misal: "
+            "\"ganti nama customer jadi Grandia Hotel\"."
+        )
+        return
+
+    context.user_data["pending_edit"] = {"no_invoice": no_invoice, "updates": updates}
+    lines = [f"*Mau diganti di {no_invoice}:*", ""]
+    for k, v in updates.items():
+        lama = first.get(_EDIT_FIELD_COLUMN[k], "") or "-"
+        lines.append(f"• {_EDIT_FIELD_LABEL[k]}: {lama} → *{v}*")
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Simpan Perubahan", callback_data="editorder_confirm"),
+        InlineKeyboardButton("❌ Batal", callback_data="editorder_cancel"),
+    ]])
+    await _send_text(update, "\n".join(lines), reply_markup=kb)
+
+
+async def _do_update_harga(update, context, text):
+    sheets = _sheets()
+    await update.effective_message.reply_chat_action("typing")
+    try:
+        parsed = parse_price_update(text, sheets.get_price_list())
+    except Exception as e:
+        logger.exception("gagal parse update harga")
+        await update.effective_message.reply_text(f"Waduh, gagal baca perubahan harganya: {e}")
+        return
+
+    price_map = sheets.get_price_map()
+    resolved = []
+    not_found = []
+    for it in parsed.get("items", []):
+        code = (it.get("item_code") or "").strip().upper()
+        row = price_map.get(code) if code else None
+        if row is None:
+            row = sheets.find_product(it.get("nama_disebut", ""))
+        if row is None:
+            not_found.append(it.get("nama_disebut") or "?")
+            continue
+        harga_jual_baru = it.get("harga_jual") or 0
+        harga_beli_baru = it.get("harga_beli") or 0
+        if not harga_jual_baru and not harga_beli_baru:
+            continue
+        resolved.append({
+            "item_code": row["Item_Code"],
+            "nama": row["Nama"],
+            "harga_jual_lama": row.get("Harga_Jual", 0),
+            "harga_beli_lama": row.get("Harga_Beli", 0),
+            "harga_jual_baru": harga_jual_baru or None,
+            "harga_beli_baru": harga_beli_baru or None,
+        })
+
+    if not resolved:
+        msg = "Gak nemu perubahan harga yang jelas dari pesan ini."
+        if not_found:
+            msg += " Barang yang gak ketemu di katalog: " + ", ".join(not_found) + "."
+        await update.effective_message.reply_text(msg)
+        return
+
+    context.user_data["pending_price_update"] = resolved
+    lines = ["*Mau diubah harganya:*", ""]
+    for r in resolved:
+        if r["harga_jual_baru"]:
+            lines.append(f"• {r['nama']} ({r['item_code']}) — harga jual: {rupiah(r['harga_jual_lama'])} → *{rupiah(r['harga_jual_baru'])}*")
+        if r["harga_beli_baru"]:
+            lines.append(f"• {r['nama']} ({r['item_code']}) — harga beli: {rupiah(r['harga_beli_lama'])} → *{rupiah(r['harga_beli_baru'])}*")
+    if not_found:
+        lines.append("")
+        lines.append("⚠️ Gak ketemu di katalog, dilewatin: " + ", ".join(not_found))
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Simpan", callback_data="priceupdate_confirm"),
+        InlineKeyboardButton("❌ Batal", callback_data="priceupdate_cancel"),
+    ]])
+    await _send_text(update, "\n".join(lines), reply_markup=kb)
+
+
 @owner_only
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.user_data.get("pending_order") or context.user_data.get("pending_po"):
+    if (context.user_data.get("pending_order") or context.user_data.get("pending_po")
+            or context.user_data.get("pending_edit") or context.user_data.get("pending_price_update")):
         await update.effective_message.reply_text(
-            "Masih ada order/PO yang nunggu konfirmasi. Klik tombolnya dulu, atau /batal buat batalin."
+            "Masih ada order/PO/perubahan yang nunggu konfirmasi. Klik tombolnya dulu, atau /batal buat batalin."
         )
         return
     await update.effective_message.reply_chat_action("typing")
@@ -562,9 +712,51 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parsed.get("nama_customer", "-"), parsed.get("no_hp", ""), parsed.get("alamat", ""),
             parsed.get("metode", "Kirim"), parsed["items"], ongkir=parsed.get("ongkir", 0) or 0,
         )
+        context.user_data["last_invoice"] = no_invoice
         await query.edit_message_text(f"✅ Order disimpan sebagai *{no_invoice}*. Lagi bikin invoice & surat jalan...", parse_mode=ParseMode.MARKDOWN)
         await _kirim_invoice(update, context, no_invoice)
         await _kirim_surat_jalan(update, context, no_invoice)
+        return
+
+    if data == "editorder_cancel":
+        context.user_data.pop("pending_edit", None)
+        await query.edit_message_text("Gak jadi diedit.")
+        return
+
+    if data == "editorder_confirm":
+        pending = context.user_data.pop("pending_edit", None)
+        if not pending:
+            await query.edit_message_text("Perubahannya udah gak ada / kadaluarsa, coba ulang.")
+            return
+        sheets = _sheets()
+        ok = sheets.edit_order_header(pending["no_invoice"], pending["updates"])
+        if not ok:
+            await query.edit_message_text(f"Invoice {pending['no_invoice']} gak ketemu lagi, mungkin udah berubah.")
+            return
+        context.user_data["last_invoice"] = pending["no_invoice"]
+        await query.edit_message_text(
+            f"✅ {pending['no_invoice']} udah diupdate. Lagi bikin ulang invoice & surat jalan...",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        await _kirim_invoice(update, context, pending["no_invoice"])
+        await _kirim_surat_jalan(update, context, pending["no_invoice"])
+        return
+
+    if data == "priceupdate_cancel":
+        context.user_data.pop("pending_price_update", None)
+        await query.edit_message_text("Gak jadi diubah.")
+        return
+
+    if data == "priceupdate_confirm":
+        pending = context.user_data.pop("pending_price_update", None)
+        if not pending:
+            await query.edit_message_text("Perubahannya udah gak ada / kadaluarsa, coba ulang.")
+            return
+        sheets = _sheets()
+        for r in pending:
+            sheets.update_price(r["item_code"], harga_jual=r["harga_jual_baru"], harga_beli=r["harga_beli_baru"])
+        ringkas = ", ".join(r["nama"] for r in pending)
+        await query.edit_message_text(f"✅ Harga *{ringkas}* udah diupdate di PriceList.", parse_mode=ParseMode.MARKDOWN)
         return
 
     if data == "po_cancel":

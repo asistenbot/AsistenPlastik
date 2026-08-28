@@ -1,0 +1,6 @@
+python-telegram-bot>=21.6,<22
+gspread>=6.1.2,<7
+google-auth>=2.34.0,<3
+anthropic>=0.34.0,<1
+Pillow>=10.4.0,<11
+python-dotenv>=1.0.1,<2

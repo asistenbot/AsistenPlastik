@@ -1,0 +1,216 @@
+"""
+Parsing chat/foto order customer (dan input PO ke supplier) jadi data
+terstruktur, pakai Claude. Hasil parse-nya SELALU ditunjukin ke admin dulu
+buat dikonfirmasi sebelum disimpen ke Sheets -- supaya kalau AI salah baca,
+gampang dikoreksi (lihat handle_confirm / handle_pending_correction di
+bot.py).
+"""
+
+import base64
+import json
+import re
+
+import anthropic
+
+import config
+
+_client = None
+
+
+def _get_client():
+    global _client
+    if _client is None:
+        _client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+    return _client
+
+
+def _extract_json(text):
+    """Claude kadang bungkus JSON dengan kalimat lain / code fence -- ambil
+    blok {...} pertama yang valid."""
+    text = text.strip()
+    fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if fence:
+        text = fence.group(1)
+    else:
+        brace = re.search(r"\{.*\}", text, re.DOTALL)
+        if brace:
+            text = brace.group(0)
+    return json.loads(text)
+
+
+def _catalog_context(price_list):
+    lines = []
+    for row in price_list:
+        lines.append(
+            f"- {row.get('Item_Code')} | {row.get('Nama')} | {row.get('Deskripsi')} | "
+            f"kategori {row.get('Kategori')} | satuan {row.get('Satuan')} | "
+            f"harga jual Rp{row.get('Harga_Jual')}"
+        )
+    return "\n".join(lines)
+
+
+ORDER_SYSTEM_PROMPT = """Kamu adalah asisten admin toko plastik "{business_name}".
+Tugas kamu: baca chat/foto order dari customer (biasanya berantakan, bahasa
+santai/nyingkat) dan ubah jadi data terstruktur JSON.
+
+KATALOG PRODUK YANG VALID (HARUS dipakai buat cocokin item_code -- JANGAN
+pernah mengarang item_code atau harga yang gak ada di katalog ini):
+{catalog}
+
+CUSTOMER YANG SUDAH PERNAH ORDER (buat bantu cocokin nama, boleh juga nama
+baru kalau memang customer baru):
+{customers}
+
+Balikin HANYA JSON dengan struktur persis seperti ini, tanpa teks lain:
+{{
+  "nama_customer": "nama customer, judul huruf besar tiap kata",
+  "no_hp": "nomor HP kalau disebut, kalau tidak ada string kosong",
+  "alamat": "alamat kalau disebut, kalau tidak ada string kosong",
+  "metode": "Kirim" atau "Ambil" (tebak dari konteks, default \"Kirim\" kalau gak jelas),
+  "items": [
+    {{"item_code": "KODE_DARI_KATALOG", "nama_item": "nama sesuai katalog", "qty": angka}}
+  ],
+  "ongkir": 0,
+  "catatan": "catatan buat admin kalau ada yang ambigu/gak yakin, kalau tidak ada string kosong",
+  "perlu_konfirmasi_manual": false
+}}
+
+Aturan penting:
+- qty HARUS angka (number), bukan string.
+- Kalau ada item yang disebut tapi TIDAK ketemu di katalog / ambigu bisa lebih
+  dari 1 kandidat, tetap masukin item itu dengan item_code kosong ("") dan
+  nama_item = apa yang disebut customer, terus set perlu_konfirmasi_manual
+  jadi true dan jelasin di "catatan".
+- Ongkir default 0 kecuali disebutin jelas nominalnya.
+- Jangan hitung subtotal/total, itu dihitung sistem lain.
+"""
+
+
+def parse_order_text(text, price_list, customer_names):
+    prompt = ORDER_SYSTEM_PROMPT.format(
+        business_name=config.BUSINESS_NAME,
+        catalog=_catalog_context(price_list),
+        customers=", ".join(customer_names) if customer_names else "(belum ada)",
+    )
+    client = _get_client()
+    resp = client.messages.create(
+        model=config.CLAUDE_MODEL,
+        max_tokens=2000,
+        system=prompt,
+        messages=[{"role": "user", "content": f"Chat order dari customer:\n\n{text}"}],
+    )
+    raw = "".join(block.text for block in resp.content if block.type == "text")
+    return _extract_json(raw)
+
+
+def parse_order_image(image_bytes, media_type, price_list, customer_names):
+    prompt = ORDER_SYSTEM_PROMPT.format(
+        business_name=config.BUSINESS_NAME,
+        catalog=_catalog_context(price_list),
+        customers=", ".join(customer_names) if customer_names else "(belum ada)",
+    )
+    b64 = base64.b64encode(image_bytes).decode("utf-8")
+    client = _get_client()
+    resp = client.messages.create(
+        model=config.CLAUDE_MODEL,
+        max_tokens=2000,
+        system=prompt,
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": media_type, "data": b64},
+                },
+                {
+                    "type": "text",
+                    "text": "Ini foto/screenshot order dari customer. Baca isinya dan ubah jadi JSON sesuai instruksi.",
+                },
+            ],
+        }],
+    )
+    raw = "".join(block.text for block in resp.content if block.type == "text")
+    return _extract_json(raw)
+
+
+PO_SYSTEM_PROMPT = """Kamu adalah asisten admin toko plastik "{business_name}"
+yang lagi bikin Purchase Order (PO) BELANJA BAHAN ke supplier (bukan order
+dari customer). Baca teks dari admin dan ubah jadi JSON.
+
+SUPPLIER YANG SUDAH PERNAH DIPAKAI:
+{suppliers}
+
+Balikin HANYA JSON dengan struktur persis seperti ini, tanpa teks lain:
+{{
+  "nama_supplier": "nama supplier, judul huruf besar tiap kata",
+  "items": [
+    {{"nama_item": "nama barang yang dibeli", "qty": angka, "satuan": "KG/Piece/dll", "harga_satuan": angka harga beli per satuan}}
+  ],
+  "catatan": "catatan kalau ada yang ambigu, kalau tidak ada string kosong"
+}}
+
+Aturan: qty dan harga_satuan HARUS angka. Kalau harga gak disebutin, isi 0
+dan jelasin di catatan supaya admin isi manual.
+"""
+
+
+def parse_po_text(text, supplier_names):
+    prompt = PO_SYSTEM_PROMPT.format(
+        business_name=config.BUSINESS_NAME,
+        suppliers=", ".join(supplier_names) if supplier_names else "(belum ada)",
+    )
+    client = _get_client()
+    resp = client.messages.create(
+        model=config.CLAUDE_MODEL,
+        max_tokens=1500,
+        system=prompt,
+        messages=[{"role": "user", "content": text}],
+    )
+    raw = "".join(block.text for block in resp.content if block.type == "text")
+    return _extract_json(raw)
+
+
+INTENT_SYSTEM_PROMPT = """Kamu router pesan buat bot admin toko plastik
+"{business_name}". Setiap pesan teks bebas yang diketik admin (BUKAN
+command yang diawali "/") harus kamu klasifikasikan mau ngapain, supaya
+admin gak perlu apal command kaku -- boleh nanya sesantai apapun.
+
+Balikin HANYA JSON persis struktur ini, tanpa teks lain:
+{{
+  "intent": salah satu dari daftar di bawah,
+  "target": "nama customer/supplier atau nomor invoice yang disebut, string kosong kalau gak ada",
+  "bulan": "format YYYY-MM kalau ada bulan/tahun disebut (mis. 'bulan lalu', 'Juli 2026'), string kosong kalau gak disebut -> berarti bulan berjalan",
+  "jumlah": angka nominal uang yang disebut (buat bayar utang), 0 kalau gak ada
+}}
+
+Daftar intent yang valid:
+- "order" -- ini order/pesanan dari CUSTOMER (beli barang dari kita)
+- "po" -- ini niat BELANJA/PO ke SUPPLIER (kita yang beli bahan), biasanya
+  ada kata "PO", "belanja ke", "order ke supplier", "stok dari <nama supplier>"
+- "report_piutang" -- nanya piutang / tagihan customer yang belum dibayar
+- "report_utang" -- nanya utang ke supplier yang belum dibayar
+- "report_kas_bulanan" -- nanya laporan kas / laba rugi / untung rugi bulanan
+- "report_pricelist" -- nanya daftar harga produk
+- "mark_lunas" -- bilang customer tertentu udah bayar / lunas
+- "bayar_utang" -- bilang udah bayar/cicil ke supplier tertentu
+- "lihat_invoice" -- minta liat/cetak ulang invoice customer tertentu
+- "lihat_suratjalan" -- minta liat/cetak ulang surat jalan customer tertentu
+- "lainnya" -- basa-basi / gak jelas maksudnya / gak masuk kategori manapun
+
+Kalau ragu antara "order" dan intent lain, PILIH "order" (lebih aman salah
+nanya balik daripada order customer keskip). Kalau pesan cuma sapaan atau
+gak jelas sama sekali, pilih "lainnya".
+"""
+
+
+def classify_intent(text):
+    prompt = INTENT_SYSTEM_PROMPT.format(business_name=config.BUSINESS_NAME)
+    client = _get_client()
+    resp = client.messages.create(
+        model=config.CLAUDE_MODEL,
+        max_tokens=300,
+        system=prompt,
+        messages=[{"role": "user", "content": text}],
+    )
+    raw = "".join(block.text for block in resp.content if block.type == "text")
+    return _extract_json(raw)

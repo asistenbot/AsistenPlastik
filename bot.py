@@ -792,6 +792,8 @@ async def _present_price_update(update, context, parsed):
         msg = "Gak nemu perubahan harga atau barang baru yang jelas dari pesan/foto ini."
         if not_found:
             msg += " Barang yang gak ketemu di katalog: " + ", ".join(not_found) + "."
+        if parsed.get("catatan"):
+            msg += f"\n\n📝 {parsed['catatan']}"
         await update.effective_message.reply_text(msg)
         return
 

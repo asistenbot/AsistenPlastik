@@ -428,7 +428,10 @@ def parse_price_update(text, price_list):
     client = _get_client()
     resp = client.messages.create(
         model=config.CLAUDE_MODEL,
-        max_tokens=1000,
+        # Cukup gede biar gak kepotong pas admin nyebut BANYAK barang
+        # sekaligus di 1 pesan (tiap item sekarang bisa punya sampe 7
+        # field kalau ada usulan barang baru).
+        max_tokens=3000,
         system=prompt,
         messages=[{"role": "user", "content": text}],
     )
@@ -509,7 +512,12 @@ def parse_price_update_image(image_bytes, media_type, price_list, caption=""):
         user_text += f' Caption yang dikasih admin: "{caption}"'
     resp = client.messages.create(
         model=config.CLAUDE_MODEL,
-        max_tokens=1500,
+        # Foto daftar harga supplier sering isinya 15-20+ baris, dan tiap
+        # item sekarang bisa punya sampe 7 field (kalau ada usulan barang
+        # baru) -- 1500 kepotong di tengah JSON buat tabel gede, bikin
+        # respons AI gak valid dan semuanya keanggep "gak ketemu apa-apa"
+        # (kejadian nyata 2026-08-29, tabel 17 baris). 4096 kasih ruang aman.
+        max_tokens=4096,
         system=prompt,
         messages=[{
             "role": "user",

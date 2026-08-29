@@ -214,6 +214,19 @@ class SheetsClient:
             return True
         return False
 
+    def add_product(self, item_code, nama, deskripsi="", kategori="", satuan="", harga_jual=0, harga_beli=0):
+        """Tambah 1 baris produk BARU ke PriceList. item_code WAJIB unik --
+        kalau kode itu udah kepake, gak nambah apa-apa (balikin False) biar
+        gak duplikat. Balikin True kalau berhasil ditambahin."""
+        code = (item_code or "").strip().upper()
+        if not code:
+            return False
+        if code in self.get_price_map():
+            return False
+        ws = self._ws(config.SHEET_PRICELIST)
+        ws.append_row([code, nama, deskripsi, kategori, satuan, harga_jual, harga_beli])
+        return True
+
     def get_pricelist_text(self):
         rows = self.get_price_list()
         by_kategori = {}

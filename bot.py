@@ -737,58 +737,97 @@ async def _do_cancel_order(update, context, target):
 
 async def _present_price_update(update, context, parsed):
     """Dipake bareng sama chat teks & foto -- ubah hasil parse (list items
-    harga_jual/harga_beli baru) jadi preview + tombol konfirmasi."""
+    harga_jual/harga_beli baru, + usulan barang baru yang belum ada di
+    katalog) jadi preview + tombol konfirmasi."""
     sheets = _sheets()
     price_map = sheets.get_price_map()
+    used_codes = set(price_map.keys())
     resolved = []
+    new_items = []
     not_found = []
     for it in parsed.get("items", []):
         code = (it.get("item_code") or "").strip().upper()
         row = price_map.get(code) if code else None
         if row is None:
             row = sheets.find_product(it.get("nama_disebut", ""))
-        if row is None:
-            not_found.append(it.get("nama_disebut") or "?")
+        if row is not None:
+            harga_jual_baru = it.get("harga_jual") or 0
+            harga_beli_baru = it.get("harga_beli") or 0
+            if harga_jual_baru or harga_beli_baru:
+                resolved.append({
+                    "item_code": row["Item_Code"],
+                    "nama": row["Nama"],
+                    "harga_jual_lama": row.get("Harga_Jual", 0),
+                    "harga_beli_lama": row.get("Harga_Beli", 0),
+                    "harga_jual_baru": harga_jual_baru or None,
+                    "harga_beli_baru": harga_beli_baru or None,
+                })
             continue
-        harga_jual_baru = it.get("harga_jual") or 0
-        harga_beli_baru = it.get("harga_beli") or 0
-        if not harga_jual_baru and not harga_beli_baru:
-            continue
-        resolved.append({
-            "item_code": row["Item_Code"],
-            "nama": row["Nama"],
-            "harga_jual_lama": row.get("Harga_Jual", 0),
-            "harga_beli_lama": row.get("Harga_Beli", 0),
-            "harga_jual_baru": harga_jual_baru or None,
-            "harga_beli_baru": harga_beli_baru or None,
-        })
+        # Item ini gak ketemu di katalog -- kalau AI ngasih usulan kode/
+        # kategori/satuan yang valid, tawarin sebagai PRODUK BARU (bukan
+        # cuma dilewatin) supaya admin gak perlu input manual belakangan.
+        nama_disebut = it.get("nama_disebut") or "?"
+        kode_baru = (it.get("item_code_baru") or "").strip().upper()
+        kategori_baru = (it.get("kategori_baru") or "").strip()
+        satuan_baru = (it.get("satuan_baru") or "").strip()
+        harga_beli_new = it.get("harga_beli") or 0
+        if kode_baru and kategori_baru in config.CATEGORIES and satuan_baru in config.UNITS:
+            final_kode = kode_baru
+            suffix = 2
+            while final_kode in used_codes:
+                final_kode = f"{kode_baru}{suffix}"[:10]
+                suffix += 1
+            used_codes.add(final_kode)
+            new_items.append({
+                "item_code": final_kode,
+                "nama": nama_disebut,
+                "kategori": kategori_baru,
+                "satuan": satuan_baru,
+                "harga_beli": harga_beli_new,
+            })
+        else:
+            not_found.append(nama_disebut)
 
-    if not resolved:
-        msg = "Gak nemu perubahan harga yang jelas dari pesan/foto ini."
+    if not resolved and not new_items:
+        msg = "Gak nemu perubahan harga atau barang baru yang jelas dari pesan/foto ini."
         if not_found:
             msg += " Barang yang gak ketemu di katalog: " + ", ".join(not_found) + "."
         await update.effective_message.reply_text(msg)
         return
 
     nama_supplier = (parsed.get("nama_supplier") or "").strip()
-    context.user_data["pending_price_update"] = {"items": resolved, "nama_supplier": nama_supplier}
-    lines = ["*Mau diubah harganya:*"]
+    context.user_data["pending_price_update"] = {
+        "items": resolved, "new_items": new_items, "nama_supplier": nama_supplier,
+    }
+    lines = []
     if nama_supplier:
-        lines.append(f"(dari daftar harga {nama_supplier})")
-    lines.append("")
-    for r in resolved:
-        if r["harga_jual_baru"]:
-            lines.append(f"• {r['nama']} ({r['item_code']}) — harga jual: {rupiah(r['harga_jual_lama'])} → *{rupiah(r['harga_jual_baru'])}*")
-        if r["harga_beli_baru"]:
-            lines.append(f"• {r['nama']} ({r['item_code']}) — harga beli: {rupiah(r['harga_beli_lama'])} → *{rupiah(r['harga_beli_baru'])}*")
+        lines.append(f"*Dari daftar harga {nama_supplier}:*")
+        lines.append("")
+    if resolved:
+        lines.append("*Mau diubah harganya:*")
+        for r in resolved:
+            if r["harga_jual_baru"]:
+                lines.append(f"• {r['nama']} ({r['item_code']}) — harga jual: {rupiah(r['harga_jual_lama'])} → *{rupiah(r['harga_jual_baru'])}*")
+            if r["harga_beli_baru"]:
+                lines.append(f"• {r['nama']} ({r['item_code']}) — harga beli: {rupiah(r['harga_beli_lama'])} → *{rupiah(r['harga_beli_baru'])}*")
+        lines.append("")
+    if new_items:
+        lines.append("*🆕 Barang baru yang bisa ditambahin ke katalog:*")
+        for n in new_items:
+            lines.append(
+                f"• {n['nama']} — kode *{n['item_code']}*, {n['kategori']}/{n['satuan']}, "
+                f"harga beli {rupiah(n['harga_beli'])}"
+            )
+        lines.append("")
+        lines.append("_Harga jual barang baru default Rp0 dulu -- inget diisi manual abis ini kesimpen (\"harga <kode> jadi <angka>\")._")
     if not_found:
         lines.append("")
-        lines.append("⚠️ Gak ketemu di katalog, dilewatin: " + ", ".join(not_found))
+        lines.append("⚠️ Gak ketemu di katalog & gak ada usulan barang baru yang jelas, dilewatin: " + ", ".join(not_found))
     kb = InlineKeyboardMarkup([[
         InlineKeyboardButton("✅ Simpan", callback_data="priceupdate_confirm"),
         InlineKeyboardButton("❌ Batal", callback_data="priceupdate_cancel"),
     ]])
-    await _send_text(update, "\n".join(lines), reply_markup=kb)
+    await _send_text(update, "\n".join(lines).strip(), reply_markup=kb)
 
 
 async def _do_update_harga(update, context, text):
@@ -809,8 +848,9 @@ async def _process_price_photo(update, context):
     photo = update.effective_message.photo[-1]
     file = await photo.get_file()
     image_bytes = bytes(await file.download_as_bytearray())
+    caption = (update.effective_message.caption or "").strip()
     try:
-        parsed = parse_price_update_image(image_bytes, "image/jpeg", sheets.get_price_list())
+        parsed = parse_price_update_image(image_bytes, "image/jpeg", sheets.get_price_list(), caption=caption)
     except Exception as e:
         logger.exception("gagal parse foto price list")
         await update.effective_message.reply_text(f"Waduh, gagal baca foto daftar harga ini: {e}")
@@ -976,14 +1016,42 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         items = pending.get("items", [])
         for r in items:
             sheets.update_price(r["item_code"], harga_jual=r["harga_jual_baru"], harga_beli=r["harga_beli_baru"])
+
+        new_items = pending.get("new_items", [])
+        added, skipped = [], []
+        for n in new_items:
+            code = n["item_code"]
+            ok = sheets.add_product(
+                code, n["nama"], deskripsi="", kategori=n["kategori"], satuan=n["satuan"],
+                harga_jual=0, harga_beli=n["harga_beli"],
+            )
+            if not ok:
+                # Kode kebetulan udah kepake pas confirm (jarang -- misal ada
+                # yang nambahin manual barengan) -- coba sekali lagi dengan
+                # kode alternatif daripada diem-diem gak kesimpen.
+                fallback_code = f"{code}X"[:10]
+                ok = sheets.add_product(
+                    fallback_code, n["nama"], deskripsi="", kategori=n["kategori"], satuan=n["satuan"],
+                    harga_jual=0, harga_beli=n["harga_beli"],
+                )
+                code = fallback_code if ok else code
+            (added if ok else skipped).append(f"{n['nama']} ({code})")
+
         nama_supplier = (pending.get("nama_supplier") or "").strip()
         if nama_supplier:
             sheets.add_supplier_if_new(nama_supplier)
-        ringkas = ", ".join(r["nama"] for r in items)
-        msg = f"✅ Harga *{ringkas}* udah diupdate di PriceList."
+
+        parts = []
+        if items:
+            ringkas = ", ".join(r["nama"] for r in items)
+            parts.append(f"✅ Harga *{ringkas}* udah diupdate di PriceList.")
+        if added:
+            parts.append(f"🆕 Barang baru *{', '.join(added)}* udah ditambahin ke PriceList (harga jual masih Rp0, inget diisi manual).")
+        if skipped:
+            parts.append(f"⚠️ Gagal nambahin: {', '.join(skipped)} -- kode bentrok, tambahin manual.")
         if nama_supplier:
-            msg += f" Supplier *{nama_supplier}* juga udah dicatat di tab Suppliers."
-        await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN)
+            parts.append(f"Supplier *{nama_supplier}* juga udah dicatat di tab Suppliers.")
+        await query.edit_message_text("\n".join(parts), parse_mode=ParseMode.MARKDOWN)
         return
 
     if data == "po_cancel":

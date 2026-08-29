@@ -382,15 +382,22 @@ katalog (PriceList) -- BUKAN order dari customer, BUKAN PO ke supplier.
 KATALOG PRODUK SAAT INI:
 {catalog}
 
+KATEGORI YANG VALID: {kategori_valid}
+SATUAN YANG VALID: {satuan_valid}
+
 Baca instruksi dari admin, balikin HANYA JSON persis struktur ini, tanpa
 teks lain:
 {{
+  "nama_supplier": "nama supplier kalau disebut sebagai SUMBER harga ini (misal 'harga dari supplier X'), string kosong kalau gak disebut",
   "items": [
     {{
       "item_code": "KODE_DARI_KATALOG kalau ketemu jelas, string kosong kalau item gak ketemu/ambigu",
       "nama_disebut": "nama barang persis seperti disebut admin",
       "harga_jual": angka harga jual BARU, 0 kalau harga jual TIDAK disebut/diubah,
-      "harga_beli": angka harga beli BARU, 0 kalau harga beli TIDAK disebut/diubah
+      "harga_beli": angka harga beli BARU, 0 kalau harga beli TIDAK disebut/diubah,
+      "item_code_baru": "USULAN kode singkat buat produk ini KALAU item_code di atas kosong (barang belum ada di katalog) -- huruf besar, alfanumerik tanpa spasi, max 10 karakter, JANGAN sama dengan kode yang udah ada di katalog. Kosongkan kalau item_code di atas SUDAH terisi.",
+      "kategori_baru": "kategori dari daftar KATEGORI YANG VALID di atas yang paling cocok, HANYA diisi kalau item_code_baru diisi",
+      "satuan_baru": "satuan dari daftar SATUAN YANG VALID di atas yang paling cocok, HANYA diisi kalau item_code_baru diisi"
     }}
   ]
 }}
@@ -403,7 +410,11 @@ Aturan:
 - Kalau nama barang yang disebut gak ketemu jelas di katalog (atau
   ambigu, bisa lebih dari 1 kandidat), tetap masukin ke items dengan
   item_code kosong ("") biar admin dikasih tau gak ketemu -- jangan
-  mengarang item_code.
+  mengarang item_code yang dipaksa cocok ke katalog. Tapi TETEP isi
+  item_code_baru/kategori_baru/satuan_baru buat item itu (usulan produk
+  BARU), supaya admin bisa milih nambahin ke katalog kalau mau -- JANGAN
+  kosongkan ketiganya kecuali bener-bener gak ada cukup info (misal harga
+  doang tanpa nama jelas sama sekali).
 """
 
 
@@ -411,6 +422,8 @@ def parse_price_update(text, price_list):
     prompt = PRICE_UPDATE_SYSTEM_PROMPT.format(
         business_name=config.BUSINESS_NAME,
         catalog=_catalog_context(price_list),
+        kategori_valid=", ".join(config.CATEGORIES),
+        satuan_valid=", ".join(config.UNITS),
     )
     client = _get_client()
     resp = client.messages.create(
@@ -432,20 +445,28 @@ customer, bukan daftar harga jual kita sendiri). Tugas kamu: baca foto ini
 baris per baris, cocokin tiap barang ke katalog produk kita, terus tentuin
 HARGA BELI (harga modal, dari supplier ke kita) yang baru buat tiap barang.
 Kalau di foto ada nama perusahaan/toko supplier-nya (biasanya di bagian
-atas/kop surat foto), catat juga nama itu.
+atas/kop surat foto), catat juga nama itu -- CAPTION dari admin (kalau ada,
+lihat di bawah) JUGA bisa nyebut nama supplier-nya, itu sumber yang SAMA
+validnya kayak yang keliatan di foto.
 
 KATALOG PRODUK KITA SAAT INI:
 {catalog}
 
+KATEGORI YANG VALID: {kategori_valid}
+SATUAN YANG VALID: {satuan_valid}
+{caption_context}
 Balikin HANYA JSON persis struktur ini, tanpa teks lain:
 {{
-  "nama_supplier": "nama perusahaan/toko supplier yang tertulis di foto (kop/header), string kosong kalau gak keliatan jelas",
+  "nama_supplier": "nama supplier -- dari kop/header foto ATAU dari caption admin kalau disebut di situ, string kosong kalau beneran gak disebut di manapun",
   "items": [
     {{
       "item_code": "KODE_DARI_KATALOG kalau ketemu jelas, string kosong kalau item gak ketemu/ambigu",
       "nama_disebut": "nama barang persis seperti tertulis di foto",
       "harga_jual": 0,
-      "harga_beli": angka harga beli/modal yang tertulis di foto buat barang ini
+      "harga_beli": angka harga beli/modal yang tertulis di foto buat barang ini,
+      "item_code_baru": "USULAN kode singkat buat produk ini KALAU item_code di atas kosong (barang belum ada di katalog) -- huruf besar, alfanumerik tanpa spasi, max 10 karakter, JANGAN sama dengan kode yang udah ada di katalog. Kosongkan kalau item_code di atas SUDAH terisi.",
+      "kategori_baru": "kategori dari daftar KATEGORI YANG VALID di atas yang paling cocok, HANYA diisi kalau item_code_baru diisi",
+      "satuan_baru": "satuan dari daftar SATUAN YANG VALID di atas yang paling cocok, HANYA diisi kalau item_code_baru diisi"
     }}
   ]
 }}
@@ -459,19 +480,33 @@ Aturan:
   (berdasarkan nama/ukuran/kategori). Kalau ada barang di foto yang gak
   ketemu jelas di katalog kita (atau ambigu), tetap masukin ke items
   dengan item_code kosong ("") biar admin dikasih tau -- jangan mengarang
-  item_code.
-- JANGAN mengarang nama_supplier kalau emang gak keliatan jelas di foto,
-  biarin string kosong.
+  item_code yang dipaksa cocok ke katalog. Tapi TETEP isi
+  item_code_baru/kategori_baru/satuan_baru buat item itu (usulan produk
+  BARU), supaya admin bisa milih nambahin ke katalog kalau mau -- JANGAN
+  kosongkan ketiganya kecuali bener-bener gak ada cukup info.
+- JANGAN mengarang nama_supplier kalau emang gak keliatan jelas di foto
+  MAUPUN di caption, biarin string kosong.
 """
 
 
-def parse_price_update_image(image_bytes, media_type, price_list):
+def parse_price_update_image(image_bytes, media_type, price_list, caption=""):
+    caption = (caption or "").strip()
+    caption_context = (
+        f'\nCAPTION dari admin buat foto ini: "{caption}"\n' if caption
+        else "\n(Admin gak kasih caption buat foto ini.)\n"
+    )
     prompt = PRICE_UPDATE_IMAGE_SYSTEM_PROMPT.format(
         business_name=config.BUSINESS_NAME,
         catalog=_catalog_context(price_list),
+        kategori_valid=", ".join(config.CATEGORIES),
+        satuan_valid=", ".join(config.UNITS),
+        caption_context=caption_context,
     )
     b64 = base64.b64encode(image_bytes).decode("utf-8")
     client = _get_client()
+    user_text = "Ini foto daftar harga dari supplier. Baca isinya dan ubah jadi JSON sesuai instruksi."
+    if caption:
+        user_text += f' Caption yang dikasih admin: "{caption}"'
     resp = client.messages.create(
         model=config.CLAUDE_MODEL,
         max_tokens=1500,
@@ -485,7 +520,7 @@ def parse_price_update_image(image_bytes, media_type, price_list):
                 },
                 {
                     "type": "text",
-                    "text": "Ini foto daftar harga dari supplier. Baca isinya dan ubah jadi JSON sesuai instruksi.",
+                    "text": user_text,
                 },
             ],
         }],

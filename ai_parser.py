@@ -24,9 +24,23 @@ def _get_client():
     return _client
 
 
+class AIResponseNotJSON(Exception):
+    """Dilempar internal kalau Claude BENERAN gak balikin JSON sama sekali
+    (misal dia nolak/nulis penjelasan biasa, bukan format yang diminta) --
+    biasanya kejadian kalau yang dikasih (foto/teks) ternyata bukan hal yang
+    diminta buat diparse (misal foto price list dikirim ke parser order).
+    Ini BUKAN bug -- caller yang relevan nangkep ini dan kasih fallback yang
+    aman, bukan nge-crash nunjukin exception mentah ke admin."""
+    def __init__(self, raw_text):
+        self.raw_text = raw_text
+        super().__init__("Respons AI bukan JSON yang valid")
+
+
 def _extract_json(text):
     """Claude kadang bungkus JSON dengan kalimat lain / code fence -- ambil
-    blok {...} pertama yang valid."""
+    blok {...} pertama yang valid. Kalau BENERAN gak ketemu JSON sama sekali,
+    lempar AIResponseNotJSON (bawa teks mentahnya) daripada biarin
+    JSONDecodeError mentah nyampe ke user."""
     text = text.strip()
     fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     if fence:
@@ -35,7 +49,43 @@ def _extract_json(text):
         brace = re.search(r"\{.*\}", text, re.DOTALL)
         if brace:
             text = brace.group(0)
-    return json.loads(text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        raise AIResponseNotJSON(text)
+
+
+def _cuplikan(raw_text, maks=300):
+    t = (raw_text or "").strip()
+    return t[:maks] + "..." if len(t) > maks else t
+
+
+def _empty_order_result(raw_text):
+    """Fallback aman kalau Claude gak balikin JSON order sama sekali --
+    biasanya karena yang dikasih BUKAN order customer (misal foto price
+    list/dokumen lain, atau pesan yang gak jelas). items kosong bikin
+    safety net di bot.py (_process_order_text/_process_order_photo) nolak
+    bikin pending_order, dan kasih tau admin apa adanya -- bukan crash."""
+    catatan = "AI gak bisa baca ini jadi data order. Kemungkinan ini bukan order customer."
+    cuplikan = _cuplikan(raw_text)
+    if cuplikan:
+        catatan += f"\n\nJawaban AI: {cuplikan}"
+    return {
+        "nama_customer": "", "no_hp": "", "alamat": "", "metode": "Kirim",
+        "items": [], "ongkir": 0, "catatan": catatan,
+        "perlu_konfirmasi_manual": True,
+    }
+
+
+def _empty_price_update_result(raw_text):
+    """Sama kayak _empty_order_result tapi buat jalur update harga -- items
+    kosong bikin _present_price_update di bot.py kasih tau "Gak nemu
+    perubahan harga..." apa adanya, bukan crash."""
+    catatan = "AI gak bisa baca ini jadi update harga."
+    cuplikan = _cuplikan(raw_text)
+    if cuplikan:
+        catatan += f"\n\nJawaban AI: {cuplikan}"
+    return {"items": [], "nama_supplier": "", "catatan": catatan}
 
 
 def _catalog_context(price_list):
@@ -100,7 +150,10 @@ def parse_order_text(text, price_list, customer_names):
         messages=[{"role": "user", "content": f"Chat order dari customer:\n\n{text}"}],
     )
     raw = "".join(block.text for block in resp.content if block.type == "text")
-    return _extract_json(raw)
+    try:
+        return _extract_json(raw)
+    except AIResponseNotJSON as e:
+        return _empty_order_result(e.raw_text)
 
 
 def parse_order_image(image_bytes, media_type, price_list, customer_names):
@@ -130,7 +183,10 @@ def parse_order_image(image_bytes, media_type, price_list, customer_names):
         }],
     )
     raw = "".join(block.text for block in resp.content if block.type == "text")
-    return _extract_json(raw)
+    try:
+        return _extract_json(raw)
+    except AIResponseNotJSON as e:
+        return _empty_order_result(e.raw_text)
 
 
 PO_SYSTEM_PROMPT = """Kamu adalah asisten admin toko plastik "{business_name}"
@@ -185,8 +241,11 @@ Balikin HANYA JSON persis struktur ini, tanpa teks lain:
 
 Daftar intent yang valid:
 - "order" -- ini order/pesanan dari CUSTOMER (beli barang dari kita)
-- "po" -- ini niat BELANJA/PO ke SUPPLIER (kita yang beli bahan), biasanya
-  ada kata "PO", "belanja ke", "order ke supplier", "stok dari <nama supplier>"
+- "po" -- ini niat BELANJA/PO ke SUPPLIER SEKARANG (kita yang mau beli bahan,
+  nyebut barang + QTY yang mau dibeli), biasanya ada kata "PO", "belanja ke",
+  "order ke supplier", "stok dari <nama supplier> <qty barang>". Kalau CUMA
+  ngasih tau/masukin daftar harga dari supplier TANPA qty barang yang mau
+  dibeli, itu bukan "po" -- itu "update_harga" (lihat di bawah).
 - "report_piutang" -- nanya piutang / tagihan customer yang belum dibayar
 - "report_utang" -- nanya utang ke supplier yang belum dibayar
 - "report_kas_bulanan" -- nanya laporan kas / laba rugi / untung rugi bulanan
@@ -209,21 +268,30 @@ Daftar intent yang valid:
   referensi ke order/invoice/customer tertentu, TANPA nyebut field
   spesifik apa yang mau diganti isinya.
 - "update_harga" -- admin mau UBAH HARGA JUAL dan/atau HARGA BELI produk di
-  katalog/PriceList (bukan order dari customer, bukan PO ke supplier).
-  Ciri-cirinya: nyebut nama/kode barang + harga/angka rupiah, pakai kata
-  kayak "harga", "naikin", "turunin", "sekarang", "ganti harga", "update
-  harga", dan TIDAK nyebut nama customer atau supplier yang lagi
-  transaksi. Contoh: "harga tulip naik jadi 17000", "PP bening 40x60
-  sekarang 30rb", "update harga TUL-01 jadi 16500".
+  katalog/PriceList (bukan order dari customer, bukan PO/belanja ke
+  supplier). Ciri-cirinya: nyebut nama/kode barang + harga/angka rupiah,
+  pakai kata kayak "harga", "naikin", "turunin", "sekarang", "ganti harga",
+  "update harga", "masukin harga/price list", dan TIDAK nyebut QTY barang
+  yang lagi mau DIBELI/dipesan sekarang. PENTING: nyebut nama SUPPLIER itu
+  BOLEH dan TETEP update_harga selama cuma sebagai SUMBER/ASAL data harga
+  (misal "harga dari supplier X, tolong masukin", "update harga beli dari
+  price list Y", foto daftar harga dengan caption nyebut nama tokonya) --
+  yang bikin ini JADI "po" adalah kalau ada QTY barang yang mau dibeli
+  sekarang (lihat penjelasan "po" di atas). Contoh update_harga: "harga
+  tulip naik jadi 17000", "PP bening 40x60 sekarang 30rb", "update harga
+  TUL-01 jadi 16500", "harga dari supplier CSB 087853077492, tolong
+  masukin, harga beli yg di kolom include", foto price list dengan caption
+  "daftar harga supplier baru, masukin ya".
 - "lainnya" -- basa-basi / gak jelas maksudnya / gak masuk kategori manapun
 
 Kalau ragu antara "order" dan intent lain, PILIH "order" (lebih aman salah
 nanya balik daripada order customer keskip) -- KECUALI kalau pesannya
 diawali kata edit/ganti/betulin/koreksi dan gak nyebut barang (itu
 edit_order), diawali hapus/batalin/cancel tanpa nyebut field spesifik
-(itu batal_order), atau nyebut barang + harga TANPA nama customer/qty
-pembelian (itu update_harga). Kalau pesan cuma sapaan atau gak jelas sama
-sekali, pilih "lainnya".
+(itu batal_order), atau nyebut barang/daftar harga + kata "masukin"/
+"update"/"harga" TANPA qty barang yang mau dibeli sekarang (itu
+update_harga, WALAUPUN ada nama supplier disebut sebagai sumber datanya).
+Kalau pesan cuma sapaan atau gak jelas sama sekali, pilih "lainnya".
 """
 
 
@@ -352,7 +420,10 @@ def parse_price_update(text, price_list):
         messages=[{"role": "user", "content": text}],
     )
     raw = "".join(block.text for block in resp.content if block.type == "text")
-    return _extract_json(raw)
+    try:
+        return _extract_json(raw)
+    except AIResponseNotJSON as e:
+        return _empty_price_update_result(e.raw_text)
 
 
 PRICE_UPDATE_IMAGE_SYSTEM_PROMPT = """Kamu asisten admin toko plastik "{business_name}".
@@ -420,4 +491,7 @@ def parse_price_update_image(image_bytes, media_type, price_list):
         }],
     )
     raw = "".join(block.text for block in resp.content if block.type == "text")
-    return _extract_json(raw)
+    try:
+        return _extract_json(raw)
+    except AIResponseNotJSON as e:
+        return _empty_price_update_result(e.raw_text)

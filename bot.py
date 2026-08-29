@@ -556,6 +556,17 @@ async def _process_order_text(update, context, text):
         await update.effective_message.reply_text(f"Waduh, gagal baca order ini: {e}")
         return
     parsed["items"] = _resolve_items_with_price(parsed.get("items", []), sheets)
+
+    # Safety net: kalau AI gak nemu barang order sama sekali, jangan tunjukin
+    # preview order kosong (Rp0) dengan tombol Simpan -- bikin bingung dan
+    # kalau kepencet malah nyimpen order kosong ke Sheets.
+    if not parsed.get("items"):
+        msg = "Gak nemu barang order di pesan ini."
+        if parsed.get("catatan"):
+            msg += f"\n\n📝 {parsed['catatan']}"
+        await update.effective_message.reply_text(msg)
+        return
+
     context.user_data["pending_order"] = parsed
     kb = InlineKeyboardMarkup([[
         InlineKeyboardButton("✅ Simpan", callback_data="order_confirm"),
@@ -820,6 +831,24 @@ async def _process_order_photo(update, context):
         await update.effective_message.reply_text(f"Waduh, gagal baca foto ini: {e}")
         return
     parsed["items"] = _resolve_items_with_price(parsed.get("items", []), sheets)
+
+    # Safety net: kalau AI gak nemu barang order sama sekali (misal fotonya
+    # ternyata price list/dokumen lain, bukan order customer), JANGAN
+    # tunjukin preview order kosong (Rp0) dengan tombol Simpan -- itu bikin
+    # bingung dan kalau kepencet malah nyimpen order kosong ke Sheets. Kasih
+    # tau langsung apa yang kebaca AI-nya, tanpa bikin pending_order.
+    if not parsed.get("items"):
+        msg = "Gak nemu barang order di foto ini."
+        if parsed.get("catatan"):
+            msg += f"\n\n📝 {parsed['catatan']}"
+        msg += (
+            "\n\nKalau ini sebenernya daftar harga dari supplier, kirim ulang "
+            "fotonya dengan caption yang jelas, misal \"update harga beli dari "
+            "foto ini\"."
+        )
+        await update.effective_message.reply_text(msg)
+        return
+
     context.user_data["pending_order"] = parsed
     kb = InlineKeyboardMarkup([[
         InlineKeyboardButton("✅ Simpan", callback_data="order_confirm"),

@@ -1,6 +1,8 @@
 """
-Generate Invoice, Surat Jalan, dan Purchase Order sebagai GAMBAR (PNG) yang
-rapi, siap di-forward ke customer/kurir/supplier langsung dari Telegram.
+Generate Invoice, Surat Jalan, dan Purchase Order sebagai GAMBAR (PNG, buat
+preview cepet & gampang di-forward lewat chat) SEKALIGUS PDF (buat di-print
+rapi di kertas A4). Tiap fungsi generate_*_image balikin tuple
+(png_buffer, pdf_buffer).
 """
 
 import io
@@ -44,6 +46,21 @@ def F_REG(size=17):
 
 def F_SMALL(size=14):
     return _font("DejaVuSans.ttf", size)
+
+
+def _pdf_from_image(img, page_width_in=7.48):
+    """Ubah 1 gambar dokumen (invoice/surat jalan/PO) jadi PDF 1 halaman,
+    diskalain biar lebar dokumennya ~190mm (7.48in) -- pas dicetak di
+    kertas A4 (210mm) masih nyisa margin kiri-kanan yang wajar. Tingginya
+    ngikutin proporsi gambar aslinya (dokumen kita ketinggiannya emang
+    variabel tergantung jumlah item, bukan dipaksa pas A4 -- kalau order-nya
+    pendek ya PDF-nya pendek, printer/PDF reader yang urus \"fit to page\"
+    kalau perlu)."""
+    resolution = img.width / page_width_in
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="PDF", resolution=resolution)
+    buf.seek(0)
+    return buf
 
 
 def rupiah(n):
@@ -208,10 +225,11 @@ def generate_invoice_image(no_invoice, nama_customer, no_hp, alamat, metode, ite
     y += 32
     draw.text((MARGIN, y), "Terima Kasih", font=F_SMALL(13), fill=MUTED)
 
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    buf.seek(0)
-    return buf
+    png_buf = io.BytesIO()
+    img.save(png_buf, format="PNG")
+    png_buf.seek(0)
+    pdf_buf = _pdf_from_image(img)
+    return png_buf, pdf_buf
 
 
 def generate_surat_jalan_image(no_surat_jalan, nama_customer, no_hp, alamat, metode, items, no_invoice_ref=None):
@@ -264,10 +282,11 @@ def generate_surat_jalan_image(no_surat_jalan, nama_customer, no_hp, alamat, met
     draw.text((MARGIN, y + 8), "Dikirim oleh", font=F_SMALL(13), fill=MUTED)
     draw.text((MARGIN + col_w + 30, y + 8), "Diterima oleh", font=F_SMALL(13), fill=MUTED)
 
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    buf.seek(0)
-    return buf
+    png_buf = io.BytesIO()
+    img.save(png_buf, format="PNG")
+    png_buf.seek(0)
+    pdf_buf = _pdf_from_image(img)
+    return png_buf, pdf_buf
 
 
 def generate_po_image(no_po, nama_supplier, items):
@@ -321,7 +340,8 @@ def generate_po_image(no_po, nama_supplier, items):
 
     draw.text((MARGIN, y), "Mohon konfirmasi ketersediaan barang. Terima kasih.", font=F_SMALL(13), fill=MUTED)
 
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    buf.seek(0)
-    return buf
+    png_buf = io.BytesIO()
+    img.save(png_buf, format="PNG")
+    png_buf.seek(0)
+    pdf_buf = _pdf_from_image(img)
+    return png_buf, pdf_buf

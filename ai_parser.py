@@ -257,7 +257,11 @@ ini, tanpa teks lain:
   "alamat": "nilai baru kalau alamat mau diganti, string kosong kalau TIDAK diganti",
   "metode": "'Kirim' atau 'Ambil' kalau metode mau diganti, string kosong kalau TIDAK diganti",
   "items": [
-    {{"item_code": "kode item (dari daftar ITEM DI ORDER INI di atas) yang qty-nya mau diganti", "qty_baru": angka qty baru}}
+    {{
+      "item_code": "kode item (dari daftar ITEM DI ORDER INI di atas) yang mau diganti",
+      "qty_baru": angka qty baru, 0 kalau qty item ini TIDAK diganti,
+      "harga_satuan_baru": angka harga satuan BARU khusus buat order ini aja, 0 kalau TIDAK diganti
+    }}
   ]
 }}
 
@@ -271,12 +275,19 @@ Aturan penting:
   (case-insensitive) dengan nama customer yang udah kesimpen sekarang,
   berarti gak ada yang perlu diubah -- biarin nama_customer string kosong,
   JANGAN balikin nilai yang sama sebagai "perubahan".
-- "items" cuma diisi kalau admin EKSPLISIT minta ganti QTY salah satu
-  barang yang UDAH ada di order ini (misal "qty jadi 25kg", "yang tulip
-  jadi 10 pack aja"). Kalau order cuma punya 1 macam barang dan admin
-  nyebut qty baru tanpa nama barang, itu barang itu yang dimaksud. JANGAN
-  nambah barang baru atau hapus barang yang gak disebut -- kalau gak ada
-  permintaan ganti qty, biarin items jadi array kosong [].
+- "items" cuma diisi kalau admin EKSPLISIT minta ganti QTY dan/atau HARGA
+  SATUAN salah satu barang yang UDAH ada di order ini (misal "qty jadi
+  25kg", "yang tulip jadi 10 pack aja", "harganya jadi 18000",
+  "plastik sampah harganya di update jadi 16000"). Kalau order cuma punya
+  1 macam barang dan admin nyebut qty/harga baru tanpa nama barang, itu
+  barang itu yang dimaksud. JANGAN nambah barang baru atau hapus barang
+  yang gak disebut. "harga_satuan_baru" di sini CUMA ngubah harga di order
+  INI SAJA (buat invoice-nya), BUKAN ngubah harga jual permanen di
+  katalog/PriceList (itu urusan lain, di luar tugas kamu).
+- PENTING: kalau admin nyebut "harganya di update" / "harganya berubah"
+  TAPI GAK NYEBUT ANGKA BARUNYA SAMA SEKALI, JANGAN NEBAK angkanya --
+  biarin harga_satuan_baru 0 (gak diganti) buat item itu, biar admin
+  diminta nyebutin angkanya secara eksplisit.
 """
 
 
@@ -339,6 +350,74 @@ def parse_price_update(text, price_list):
         max_tokens=1000,
         system=prompt,
         messages=[{"role": "user", "content": text}],
+    )
+    raw = "".join(block.text for block in resp.content if block.type == "text")
+    return _extract_json(raw)
+
+
+PRICE_UPDATE_IMAGE_SYSTEM_PROMPT = """Kamu asisten admin toko plastik "{business_name}".
+Admin barusan kirim FOTO daftar harga dari SUPPLIER (bukan order dari
+customer, bukan daftar harga jual kita sendiri). Tugas kamu: baca foto ini
+baris per baris, cocokin tiap barang ke katalog produk kita, terus tentuin
+HARGA BELI (harga modal, dari supplier ke kita) yang baru buat tiap barang.
+Kalau di foto ada nama perusahaan/toko supplier-nya (biasanya di bagian
+atas/kop surat foto), catat juga nama itu.
+
+KATALOG PRODUK KITA SAAT INI:
+{catalog}
+
+Balikin HANYA JSON persis struktur ini, tanpa teks lain:
+{{
+  "nama_supplier": "nama perusahaan/toko supplier yang tertulis di foto (kop/header), string kosong kalau gak keliatan jelas",
+  "items": [
+    {{
+      "item_code": "KODE_DARI_KATALOG kalau ketemu jelas, string kosong kalau item gak ketemu/ambigu",
+      "nama_disebut": "nama barang persis seperti tertulis di foto",
+      "harga_jual": 0,
+      "harga_beli": angka harga beli/modal yang tertulis di foto buat barang ini
+    }}
+  ]
+}}
+
+Aturan:
+- Harga yang tertulis di foto daftar harga supplier ini SELALU dianggap
+  HARGA BELI (harga_beli) -- harga_jual SELALU 0 di sini, JANGAN diisi,
+  itu urusan admin nentuin sendiri nanti.
+- Baca SEMUA baris/item yang kebaca di foto, jangan cuma yang pertama.
+- Cocokin tiap baris ke item_code yang paling sesuai di katalog kita
+  (berdasarkan nama/ukuran/kategori). Kalau ada barang di foto yang gak
+  ketemu jelas di katalog kita (atau ambigu), tetap masukin ke items
+  dengan item_code kosong ("") biar admin dikasih tau -- jangan mengarang
+  item_code.
+- JANGAN mengarang nama_supplier kalau emang gak keliatan jelas di foto,
+  biarin string kosong.
+"""
+
+
+def parse_price_update_image(image_bytes, media_type, price_list):
+    prompt = PRICE_UPDATE_IMAGE_SYSTEM_PROMPT.format(
+        business_name=config.BUSINESS_NAME,
+        catalog=_catalog_context(price_list),
+    )
+    b64 = base64.b64encode(image_bytes).decode("utf-8")
+    client = _get_client()
+    resp = client.messages.create(
+        model=config.CLAUDE_MODEL,
+        max_tokens=1500,
+        system=prompt,
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": media_type, "data": b64},
+                },
+                {
+                    "type": "text",
+                    "text": "Ini foto daftar harga dari supplier. Baca isinya dan ubah jadi JSON sesuai instruksi.",
+                },
+            ],
+        }],
     )
     raw = "".join(block.text for block in resp.content if block.type == "text")
     return _extract_json(raw)

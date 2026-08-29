@@ -5,6 +5,8 @@ Bot Telegram buat bantu admin ngerapihin order plastik jadi:
 - Invoice otomatis (harga x qty + info rekening)
 - Surat Jalan otomatis (tanpa harga, buat kurir)
 - Purchase Order (PO) ke supplier + catatan utang otomatis
+- Semua dokumen (Invoice/Surat Jalan/PO) otomatis dalam 2 versi: gambar PNG
+  (preview cepat) dan **PDF siap print ukuran A4**
 - Pembukuan sederhana: kas masuk/keluar, piutang customer, utang supplier,
   laporan laba rugi bulanan
 
@@ -99,6 +101,28 @@ beli 26rb". Bot cocokin ke katalog, tunjukin harga lama → baru buat
 dikonfirmasi, begitu di-OK langsung keupdate di tab PriceList Google
 Sheets. Boleh beberapa produk sekaligus dalam 1 pesan.
 
+**Punya daftar harga dari supplier dalam bentuk FOTO?** Kirim fotonya
+dengan CAPTION yang jelas, misal "update harga beli dari foto ini" atau
+"daftar harga supplier baru" -- bot baca semua baris di foto sekaligus
+(dianggap harga BELI/modal), cocokin ke katalog, tunjukin preview buat
+dikonfirmasi. **Penting:** kalau foto dikirim TANPA caption / captionnya
+gak jelas, bot anggap itu ORDER customer (biar order gak kelewat) -- jadi
+selalu kasih caption yang jelas kalau maksudnya update harga.
+
+Kalau di foto daftar harga itu ada **nama perusahaan/toko supplier-nya**
+(biasanya di kop surat bagian atas foto), bot otomatis bacain juga dan
+begitu dikonfirmasi, nama supplier itu langsung kedaftar sendiri di tab
+`Suppliers` -- gak perlu diketik manual. Kalau nama suppliernya gak
+kebaca jelas di foto, bagian ini dilewatin aja (harga tetep keupdate
+seperti biasa), admin bisa isi manual belakangan di tab `Suppliers` kalau
+mau.
+
+**Mau betulin harga SATU item di SATU order tertentu** (misal harga
+berubah setelah order dibikin, sebelum invoice dikirim ke customer)?
+Sama kayak edit_order biasa: "harga tulip di order ini jadi 18000" --
+bedanya ini cuma ngubah invoice order itu doang, BUKAN harga permanen di
+katalog (buat itu pakai fitur update harga di atas).
+
 **Order-nya gak jadi / mau dihapus total?** Bilang "hapus order Grandia
 Hotel" atau "batalin invoice INV-20260828-001" -- bot nanya konfirmasi
 dulu (nunjukin nama customer & totalnya), begitu di-OK order ditandai
@@ -124,10 +148,18 @@ dari perhitungan piutang).
 | `/laporanbulanan [YYYY-MM]` | Laporan kas & laba rugi bulanan |
 | `/batal` | Batalin order/PO yang lagi nunggu konfirmasi |
 
+**Order dari customer dikirim dalam bentuk foto dokumen (misal foto PO dari
+customer, atau foto surat pesanan)?** Langsung aja forward/kirim fotonya ke
+bot **tanpa caption** (atau caption apa aja yang bukan soal update harga) --
+bot bakal baca isinya kayak baca chat order biasa, tunjukin hasil parse-nya
+buat dikonfirmasi sebelum disimpen. Ini alur yang sama kayak order dari foto
+struk/nota biasa, cuma sumbernya beda.
+
 ## 8. Batasan Versi Ini
 
-- Invoice, Surat Jalan, dan PO dikirim sebagai **gambar PNG** rapi, siap
-  di-forward ke customer/kurir/supplier.
+- Invoice, Surat Jalan, dan PO dikirim dalam **2 bentuk**: gambar PNG (buat
+  preview cepat di chat) dan **file PDF** (siap di-print rapi ukuran A4) --
+  keduanya otomatis terkirim bareng, gak perlu diminta.
 - Parsing chat/foto order pakai AI itu cukup pinter buat kalimat natural,
   tapi tetep nunjukin hasil parse-nya dulu buat dikonfirmasi sebelum
   disimpen -- supaya gak ada salah baca.

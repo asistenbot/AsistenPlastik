@@ -400,10 +400,15 @@ class SheetsClient:
             self.add_customer_if_new(updates["nama_customer"].strip())
         return True
 
-    def edit_order_item_qty(self, no_invoice, item_code, qty_baru):
-        """Ganti Qty (dan Subtotal ngikut, dihitung ulang dari Harga_Satuan
-        yang udah ada) buat 1 item di dalam order tertentu. Balikin True
-        kalau baris item ketemu & keupdate, False kalau enggak."""
+    def edit_order_item_qty(self, no_invoice, item_code, qty_baru=None, harga_baru=None):
+        """Ganti Qty dan/atau Harga_Satuan (Subtotal dihitung ulang otomatis
+        dari nilai final keduanya) buat 1 item di dalam order tertentu.
+        Field yang dikasih None dibiarin sama kayak sebelumnya. Balikin
+        True kalau baris item ketemu & keupdate, False kalau enggak (atau
+        kalau qty_baru & harga_baru dua-duanya None -- gak ada yang mau
+        diubah)."""
+        if qty_baru is None and harga_baru is None:
+            return False
         ws = self._ws(config.SHEET_ORDERS)
         headers = ws.row_values(1)
         col_invoice = headers.index("No_Invoice") + 1
@@ -423,15 +428,15 @@ class SheetsClient:
             if row[col_item_code - 1].strip().upper() != target_code:
                 continue
             try:
-                harga = float(row[col_harga - 1] or 0)
-            except ValueError:
-                harga = 0
-            try:
-                qty_val = float(qty_baru)
+                qty_val = float(qty_baru) if qty_baru is not None else float(row[col_qty - 1] or 0)
+                harga_val = float(harga_baru) if harga_baru is not None else float(row[col_harga - 1] or 0)
             except (TypeError, ValueError):
                 return False
-            ws.update_cell(idx, col_qty, qty_val)
-            ws.update_cell(idx, col_subtotal, harga * qty_val)
+            if qty_baru is not None:
+                ws.update_cell(idx, col_qty, qty_val)
+            if harga_baru is not None:
+                ws.update_cell(idx, col_harga, harga_val)
+            ws.update_cell(idx, col_subtotal, qty_val * harga_val)
             return True
         return False
 

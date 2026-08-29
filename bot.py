@@ -23,7 +23,7 @@ import config
 import documents
 from ai_parser import (
     parse_order_text, parse_order_image, parse_po_text, classify_intent,
-    parse_order_correction, parse_price_update,
+    parse_order_correction, parse_price_update, parse_price_update_image,
 )
 from sheets_client import get_sheets_client
 
@@ -178,7 +178,11 @@ tapi otomatis keluar dari piutang).
 *Mau update harga jual/beli produk?* Tinggal bilang aja, misal "harga
 tulip naik jadi 17000" atau "update harga TUL-01 jadi 16500" -- bot
 nunjukin dulu harga lama → baru buat dikonfirmasi, begitu di-OK langsung
-keupdate di PriceList Google Sheets.
+keupdate di PriceList Google Sheets. Kalau harga barunya dari daftar harga
+supplier yang difoto, kirim fotonya dengan CAPTION yang jelas (misal
+"update harga beli dari foto ini" atau "daftar harga supplier baru"), bot
+bakal baca semua barang di foto sekaligus (dianggap harga BELI/modal) --
+tanpa caption yang jelas, foto dianggap ORDER customer (biar aman).
 
 Command di bawah ini cadangan aja kalau mau lebih pasti/cepat:
 /pricelist — lihat daftar harga produk
@@ -343,11 +347,14 @@ async def _kirim_invoice(update, context, no_invoice):
             ongkir += float(r.get("Ongkir", 0) or 0)
         except ValueError:
             pass
-    img = documents.generate_invoice_image(
+    img, pdf = documents.generate_invoice_image(
         no_invoice, first["Nama_Customer"], first.get("No_HP", ""), first.get("Alamat", ""),
         first.get("Metode", "Kirim"), items, ongkir,
     )
     await update.effective_message.reply_photo(photo=img, caption=f"Invoice {no_invoice}")
+    await update.effective_message.reply_document(
+        document=pdf, filename=f"{no_invoice}.pdf", caption="Versi PDF (siap print A4)"
+    )
 
 
 async def _kirim_surat_jalan(update, context, no_invoice):
@@ -359,11 +366,14 @@ async def _kirim_surat_jalan(update, context, no_invoice):
     first = rows[0]
     items = [{"nama_item": r["Nama_Item"], "qty": r["Qty"], "satuan": r["Satuan"]} for r in rows]
     no_sj = no_invoice.replace(config.INVOICE_PREFIX, config.SURAT_JALAN_PREFIX, 1)
-    img = documents.generate_surat_jalan_image(
+    img, pdf = documents.generate_surat_jalan_image(
         no_sj, first["Nama_Customer"], first.get("No_HP", ""), first.get("Alamat", ""),
         first.get("Metode", "Kirim"), items, no_invoice_ref=no_invoice,
     )
     await update.effective_message.reply_photo(photo=img, caption=f"Surat Jalan {no_sj}")
+    await update.effective_message.reply_document(
+        document=pdf, filename=f"{no_sj}.pdf", caption="Versi PDF (siap print A4)"
+    )
 
 
 # ---------------- KAS & LAPORAN ----------------
@@ -588,7 +598,8 @@ async def _do_edit_order(update, context, target, text):
         return
     first = rows[0]
     items_desc = "\n".join(
-        f"  - {r.get('Item_Code','')} | {r.get('Nama_Item','')} | qty {r.get('Qty','')} {r.get('Satuan','')}"
+        f"  - {r.get('Item_Code','')} | {r.get('Nama_Item','')} | qty {r.get('Qty','')} {r.get('Satuan','')} "
+        f"| harga satuan Rp{r.get('Harga_Satuan','')}"
         for r in rows
     )
     current_desc = (
@@ -616,8 +627,9 @@ async def _do_edit_order(update, context, target, text):
     rows_by_code = {str(r.get("Item_Code", "")).strip().upper(): r for r in rows}
     for it in corr.get("items", []) or []:
         code = (it.get("item_code") or "").strip()
-        qty_baru = it.get("qty_baru")
-        if not code or qty_baru in (None, "", 0):
+        qty_baru = it.get("qty_baru") or None
+        harga_baru = it.get("harga_satuan_baru") or None
+        if not code or (qty_baru is None and harga_baru is None):
             continue
         cur_row = rows_by_code.get(code.upper())
         if not cur_row:
@@ -628,6 +640,8 @@ async def _do_edit_order(update, context, target, text):
             "satuan": cur_row.get("Satuan", ""),
             "qty_lama": cur_row.get("Qty", ""),
             "qty_baru": qty_baru,
+            "harga_lama": cur_row.get("Harga_Satuan", ""),
+            "harga_baru": harga_baru,
         })
 
     if not updates and not item_updates:
@@ -646,7 +660,13 @@ async def _do_edit_order(update, context, target, text):
         lama = first.get(_EDIT_FIELD_COLUMN[k], "") or "-"
         lines.append(f"• {_EDIT_FIELD_LABEL[k]}: {lama} → *{v}*")
     for iu in item_updates:
-        lines.append(f"• Qty {iu['nama']}: {iu['qty_lama']} {iu['satuan']} → *{iu['qty_baru']} {iu['satuan']}*")
+        if iu["qty_baru"] is not None:
+            lines.append(f"• Qty {iu['nama']}: {iu['qty_lama']} {iu['satuan']} → *{iu['qty_baru']} {iu['satuan']}*")
+        if iu["harga_baru"] is not None:
+            lines.append(
+                f"• Harga satuan {iu['nama']} (order ini aja): "
+                f"{rupiah(iu['harga_lama'])} → *{rupiah(iu['harga_baru'])}*"
+            )
     kb = InlineKeyboardMarkup([[
         InlineKeyboardButton("✅ Simpan Perubahan", callback_data="editorder_confirm"),
         InlineKeyboardButton("❌ Batal", callback_data="editorder_cancel"),
@@ -704,16 +724,10 @@ async def _do_cancel_order(update, context, target):
     )
 
 
-async def _do_update_harga(update, context, text):
+async def _present_price_update(update, context, parsed):
+    """Dipake bareng sama chat teks & foto -- ubah hasil parse (list items
+    harga_jual/harga_beli baru) jadi preview + tombol konfirmasi."""
     sheets = _sheets()
-    await update.effective_message.reply_chat_action("typing")
-    try:
-        parsed = parse_price_update(text, sheets.get_price_list())
-    except Exception as e:
-        logger.exception("gagal parse update harga")
-        await update.effective_message.reply_text(f"Waduh, gagal baca perubahan harganya: {e}")
-        return
-
     price_map = sheets.get_price_map()
     resolved = []
     not_found = []
@@ -739,14 +753,18 @@ async def _do_update_harga(update, context, text):
         })
 
     if not resolved:
-        msg = "Gak nemu perubahan harga yang jelas dari pesan ini."
+        msg = "Gak nemu perubahan harga yang jelas dari pesan/foto ini."
         if not_found:
             msg += " Barang yang gak ketemu di katalog: " + ", ".join(not_found) + "."
         await update.effective_message.reply_text(msg)
         return
 
-    context.user_data["pending_price_update"] = resolved
-    lines = ["*Mau diubah harganya:*", ""]
+    nama_supplier = (parsed.get("nama_supplier") or "").strip()
+    context.user_data["pending_price_update"] = {"items": resolved, "nama_supplier": nama_supplier}
+    lines = ["*Mau diubah harganya:*"]
+    if nama_supplier:
+        lines.append(f"(dari daftar harga {nama_supplier})")
+    lines.append("")
     for r in resolved:
         if r["harga_jual_baru"]:
             lines.append(f"• {r['nama']} ({r['item_code']}) — harga jual: {rupiah(r['harga_jual_lama'])} → *{rupiah(r['harga_jual_baru'])}*")
@@ -762,18 +780,39 @@ async def _do_update_harga(update, context, text):
     await _send_text(update, "\n".join(lines), reply_markup=kb)
 
 
-@owner_only
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if _has_pending(context):
-        await update.effective_message.reply_text(
-            "Masih ada order/PO/perubahan yang nunggu konfirmasi. Klik tombolnya dulu, atau /batal buat batalin."
-        )
+async def _do_update_harga(update, context, text):
+    sheets = _sheets()
+    await update.effective_message.reply_chat_action("typing")
+    try:
+        parsed = parse_price_update(text, sheets.get_price_list())
+    except Exception as e:
+        logger.exception("gagal parse update harga")
+        await update.effective_message.reply_text(f"Waduh, gagal baca perubahan harganya: {e}")
         return
+    await _present_price_update(update, context, parsed)
+
+
+async def _process_price_photo(update, context):
+    sheets = _sheets()
     await update.effective_message.reply_chat_action("typing")
     photo = update.effective_message.photo[-1]
     file = await photo.get_file()
     image_bytes = bytes(await file.download_as_bytearray())
+    try:
+        parsed = parse_price_update_image(image_bytes, "image/jpeg", sheets.get_price_list())
+    except Exception as e:
+        logger.exception("gagal parse foto price list")
+        await update.effective_message.reply_text(f"Waduh, gagal baca foto daftar harga ini: {e}")
+        return
+    await _present_price_update(update, context, parsed)
+
+
+async def _process_order_photo(update, context):
     sheets = _sheets()
+    await update.effective_message.reply_chat_action("typing")
+    photo = update.effective_message.photo[-1]
+    file = await photo.get_file()
+    image_bytes = bytes(await file.download_as_bytearray())
     try:
         parsed = parse_order_image(image_bytes, "image/jpeg", sheets.get_price_list(), sheets.get_customer_names())
     except Exception as e:
@@ -787,6 +826,35 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         InlineKeyboardButton("❌ Batal", callback_data="order_cancel"),
     ]])
     await _send_text(update, _order_preview_text(parsed), reply_markup=kb)
+
+
+@owner_only
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if _has_pending(context):
+        await update.effective_message.reply_text(
+            "Masih ada order/PO/perubahan yang nunggu konfirmasi. Klik tombolnya dulu, atau /batal buat batalin."
+        )
+        return
+
+    # Kalau foto ini dikirim dengan CAPTION (keterangan) yang jelas maksudnya
+    # bukan order (misal "update harga dari foto ini"), pakai itu buat
+    # nebak maksud fotonya. Tanpa caption / caption gak jelas -> default
+    # dianggap ORDER (paling aman, order customer gak boleh kelewat).
+    caption = (update.effective_message.caption or "").strip()
+    intent = "order"
+    if caption:
+        try:
+            route = classify_intent(caption)
+            intent = route.get("intent", "order")
+        except Exception:
+            logger.exception("gagal classify_intent dari caption foto, fallback ke order")
+            intent = "order"
+
+    if intent == "update_harga":
+        await _process_price_photo(update, context)
+        return
+
+    await _process_order_photo(update, context)
 
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -834,7 +902,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if pending.get("updates"):
             sheets.edit_order_header(no_invoice, pending["updates"])
         for iu in pending.get("item_updates", []):
-            sheets.edit_order_item_qty(no_invoice, iu["item_code"], iu["qty_baru"])
+            sheets.edit_order_item_qty(
+                no_invoice, iu["item_code"],
+                qty_baru=iu.get("qty_baru"), harga_baru=iu.get("harga_baru"),
+            )
         context.user_data["last_invoice"] = no_invoice
         await query.edit_message_text(
             f"✅ {no_invoice} udah diupdate. Lagi bikin ulang invoice & surat jalan...",
@@ -873,10 +944,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("Perubahannya udah gak ada / kadaluarsa, coba ulang.")
             return
         sheets = _sheets()
-        for r in pending:
+        items = pending.get("items", [])
+        for r in items:
             sheets.update_price(r["item_code"], harga_jual=r["harga_jual_baru"], harga_beli=r["harga_beli_baru"])
-        ringkas = ", ".join(r["nama"] for r in pending)
-        await query.edit_message_text(f"✅ Harga *{ringkas}* udah diupdate di PriceList.", parse_mode=ParseMode.MARKDOWN)
+        nama_supplier = (pending.get("nama_supplier") or "").strip()
+        if nama_supplier:
+            sheets.add_supplier_if_new(nama_supplier)
+        ringkas = ", ".join(r["nama"] for r in items)
+        msg = f"✅ Harga *{ringkas}* udah diupdate di PriceList."
+        if nama_supplier:
+            msg += f" Supplier *{nama_supplier}* juga udah dicatat di tab Suppliers."
+        await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN)
         return
 
     if data == "po_cancel":
@@ -895,8 +973,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"✅ PO *{no_po}* disimpan ({rupiah(total)}), otomatis nambah utang ke supplier ini.",
             parse_mode=ParseMode.MARKDOWN,
         )
-        img = documents.generate_po_image(no_po, parsed.get("nama_supplier", "-"), parsed["items"])
+        img, pdf = documents.generate_po_image(no_po, parsed.get("nama_supplier", "-"), parsed["items"])
         await update.effective_chat.send_photo(photo=img, caption=f"Purchase Order {no_po}")
+        await update.effective_chat.send_document(
+            document=pdf, filename=f"{no_po}.pdf", caption="Versi PDF (siap print A4)"
+        )
         return
 
 

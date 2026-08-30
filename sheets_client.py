@@ -100,6 +100,80 @@ class SheetsClient:
 
         self._seed_pricelist_if_empty()
         self._seed_customers_if_empty()
+        self._ensure_batal_red_formatting(config.SHEET_ORDERS)
+        self._ensure_batal_red_formatting(config.SHEET_PURCHASE_ORDERS)
+
+    @staticmethod
+    def _col_letter(idx0):
+        """idx0: index kolom 0-based -> huruf kolom ala Sheets (A, B, ..., Z, AA, ...)."""
+        n = idx0 + 1
+        letters = ""
+        while n > 0:
+            n, rem = divmod(n - 1, 26)
+            letters = chr(65 + rem) + letters
+        return letters
+
+    def _has_batal_conditional_format(self, sheet_id):
+        """Cek apakah tab ini UDAH punya conditional format rule Status=Batal
+        -- biar gak nambahin rule yang sama berkali-kali tiap bot restart."""
+        try:
+            meta = self.sh.fetch_sheet_metadata()
+        except Exception:
+            return True  # gagal cek -> anggap udah ada, gak usah maksa nambahin
+        for sheet in meta.get("sheets", []):
+            if sheet.get("properties", {}).get("sheetId") != sheet_id:
+                continue
+            for rule in sheet.get("conditionalFormats", []):
+                formula = (
+                    rule.get("booleanRule", {})
+                    .get("condition", {})
+                    .get("values", [{}])[0]
+                    .get("userEnteredValue", "")
+                )
+                if "Batal" in formula:
+                    return True
+        return False
+
+    def _ensure_batal_red_formatting(self, tab_name):
+        """Pasang conditional formatting: baris otomatis kewarna MERAH kalau
+        kolom Status-nya 'Batal' -- biar keliatan jelas langsung di Google
+        Sheets tanpa perlu ngapus barisnya (data batal tetep kesimpen buat
+        histori). Formatting doang, gak fatal kalau gagal (mis. akun service
+        gak punya izin format) -- bot tetep jalan normal."""
+        headers = SCHEMA.get(tab_name)
+        if not headers or "Status" not in headers:
+            return
+        try:
+            ws = self._ws(tab_name)
+            if self._has_batal_conditional_format(ws.id):
+                return
+            status_col_letter = self._col_letter(headers.index("Status"))
+            self.sh.batch_update({
+                "requests": [{
+                    "addConditionalFormatRule": {
+                        "rule": {
+                            "ranges": [{
+                                "sheetId": ws.id,
+                                "startRowIndex": 1,
+                                "startColumnIndex": 0,
+                                "endColumnIndex": len(headers),
+                            }],
+                            "booleanRule": {
+                                "condition": {
+                                    "type": "CUSTOM_FORMULA",
+                                    "values": [{"userEnteredValue": f'=${status_col_letter}2="Batal"'}],
+                                },
+                                "format": {
+                                    "backgroundColor": {"red": 0.96, "green": 0.80, "blue": 0.80},
+                                },
+                            },
+                        },
+                        "index": 0,
+                    },
+                }],
+            })
+        except Exception:
+            pass
 
     def _seed_pricelist_if_empty(self):
         ws = self.sh.worksheet(config.SHEET_PRICELIST)

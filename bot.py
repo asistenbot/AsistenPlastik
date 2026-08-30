@@ -24,6 +24,7 @@ import documents
 from ai_parser import (
     parse_order_text, parse_order_image, parse_po_text, classify_intent,
     parse_order_correction, parse_price_update, parse_price_update_image,
+    parse_po_price_fill,
 )
 from sheets_client import get_sheets_client
 
@@ -106,13 +107,59 @@ def _po_preview_text(parsed):
         harga = it.get("harga_satuan", 0) or 0
         subtotal = float(it.get("qty", 0)) * float(harga)
         total += subtotal
-        lines.append(f"• {it.get('nama_item')} x{it.get('qty')} {it.get('satuan', '')} @ {rupiah(harga)} = {rupiah(subtotal)}")
+        flag = "" if it.get("item_code") else " ⚠️ *(produk gak ketemu di katalog, cek lagi)*"
+        lines.append(f"• {it.get('nama_item')} x{it.get('qty')} {it.get('satuan', '')} @ {rupiah(harga)} = {rupiah(subtotal)}{flag}")
     lines.append("")
     lines.append(f"*Total belanja: {rupiah(total)}*")
     if parsed.get("catatan"):
         lines.append("")
         lines.append(f"📝 Catatan AI: {parsed['catatan']}")
     return "\n".join(lines)
+
+
+def _resolve_po_items_with_catalog(parsed_items, sheets):
+    """Setelah AI baca teks PO, cocokin ULANG tiap item ke katalog PriceList
+    (via item_code yang dikasih AI, atau find_product kalau item_code kosong)
+    supaya nama_item & satuan-nya PERSIS sama kayak di katalog -- bukan hasil
+    AI nulis ulang/gabung sendiri ukuran barang dari singkatan admin (ini
+    yang bikin bug "90 100kg" kebaca jadi ukuran "90 x100" padahal 100kg itu
+    qty). Harga yang udah kebaca AI (baik dari teks eksplisit maupun histori
+    katalog) tetap dipakai kalau > 0; kalau masih 0 dan produknya ketemu di
+    katalog, coba isi dari Harga_Beli katalog sebagai fallback terakhir."""
+    price_map = sheets.get_price_map()
+    resolved = []
+    for it in parsed_items:
+        code = (it.get("item_code") or "").strip().upper()
+        row = price_map.get(code) if code else None
+        if row is None:
+            row = sheets.find_product(it.get("nama_item", ""))
+        harga = it.get("harga_satuan", 0) or 0
+        try:
+            harga = float(harga)
+        except (TypeError, ValueError):
+            harga = 0
+        if row is not None:
+            if not harga:
+                try:
+                    harga = float(row.get("Harga_Beli", 0) or 0)
+                except (TypeError, ValueError):
+                    harga = 0
+            resolved.append({
+                "item_code": row["Item_Code"],
+                "nama_item": row["Nama"],
+                "satuan": row.get("Satuan", it.get("satuan", "")),
+                "harga_satuan": harga,
+                "qty": it.get("qty", 0),
+            })
+        else:
+            resolved.append({
+                "item_code": "",
+                "nama_item": it.get("nama_item", "?"),
+                "satuan": it.get("satuan", ""),
+                "harga_satuan": harga,
+                "qty": it.get("qty", 0),
+            })
+    return resolved
 
 
 def _resolve_items_with_price(parsed_items, sheets):
@@ -479,6 +526,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["awaiting"] = None
         await _process_po_text(update, context, text)
         return
+
+    pending_po = context.user_data.get("pending_po")
+    other_pending = any(context.user_data.get(k) for k in _PENDING_KEYS if k != "pending_po")
+    if pending_po and not other_pending:
+        if await _try_fill_po_price(update, context, pending_po, text):
+            return
 
     if _has_pending(context):
         await update.effective_message.reply_text(
@@ -1097,17 +1150,66 @@ async def _process_po_text(update, context, text):
     await update.effective_message.reply_chat_action("typing")
     sheets = _sheets()
     try:
-        parsed = parse_po_text(text, sheets.get_supplier_names())
+        parsed = parse_po_text(text, sheets.get_supplier_names(), sheets.get_price_list())
     except Exception as e:
         logger.exception("gagal parse PO")
         await update.effective_message.reply_text(f"Waduh, gagal baca PO ini: {e}")
         return
+    parsed["items"] = _resolve_po_items_with_catalog(parsed.get("items", []), sheets)
     context.user_data["pending_po"] = parsed
     kb = InlineKeyboardMarkup([[
         InlineKeyboardButton("✅ Simpan", callback_data="po_confirm"),
         InlineKeyboardButton("❌ Batal", callback_data="po_cancel"),
     ]])
     await _send_text(update, _po_preview_text(parsed), reply_markup=kb)
+
+
+async def _try_fill_po_price(update, context, pending, text):
+    """Kalau ada pending_po yang punya item harga masih 0, coba baca pesan
+    susulan admin (mis. "harga 18870") sebagai jawaban buat ngisi harga itu.
+    Balikin True kalau berhasil kepasangin & preview baru udah dikirim,
+    False kalau pesan gak nyambung sama sekali (biar fallback ke pesan
+    "masih ada pending" yang lama)."""
+    items = pending.get("items", [])
+    missing_idx = [i for i, it in enumerate(items) if not it.get("harga_satuan")]
+    if not missing_idx:
+        return False
+    try:
+        result = parse_po_price_fill(text, items)
+    except Exception:
+        logger.exception("gagal parse po price fill")
+        return False
+    updates = (result or {}).get("updates") or []
+    applied = []
+    for u in updates:
+        idx = u.get("index")
+        harga = u.get("harga_satuan")
+        try:
+            idx = int(idx)
+        except (TypeError, ValueError):
+            continue
+        if harga is None:
+            continue
+        try:
+            harga = float(harga)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= idx < len(items) and harga > 0:
+            items[idx]["harga_satuan"] = harga
+            applied.append(items[idx].get("nama_item"))
+    if not applied:
+        return False
+    context.user_data["pending_po"] = pending
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Simpan", callback_data="po_confirm"),
+        InlineKeyboardButton("❌ Batal", callback_data="po_cancel"),
+    ]])
+    await _send_text(
+        update,
+        f"Oke, harga *{', '.join(applied)}* udah keisi.\n\n" + _po_preview_text(pending),
+        reply_markup=kb,
+    )
+    return True
 
 
 # ---------------- MAIN ----------------

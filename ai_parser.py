@@ -189,6 +189,28 @@ def parse_order_image(image_bytes, media_type, price_list, customer_names):
         return _empty_order_result(e.raw_text)
 
 
+def _catalog_context_beli(price_list):
+    """Katalog produk lengkap (item_code + histori harga beli), dipakai di
+    prompt PO biar AI bisa: (1) cocokin item_code walau admin nulis
+    singkatan/gak lengkap, dan (2) tau harga beli terakhir kalau harga gak
+    disebut eksplisit di teks. Beda dari _catalog_context yang buat order
+    customer (nampilin harga JUAL, bukan harga beli)."""
+    lines = []
+    for row in price_list or []:
+        harga_beli = row.get("Harga_Beli")
+        try:
+            harga_num = float(harga_beli)
+        except (TypeError, ValueError):
+            harga_num = 0
+        harga_text = f"Rp{harga_beli}" if harga_num > 0 else "belum ada histori (isi manual)"
+        lines.append(
+            f"- {row.get('Item_Code')} | {row.get('Nama')} | {row.get('Deskripsi')} | "
+            f"kategori {row.get('Kategori')} | satuan {row.get('Satuan')} | "
+            f"harga beli terakhir {harga_text}"
+        )
+    return "\n".join(lines) if lines else "(katalog masih kosong)"
+
+
 PO_SYSTEM_PROMPT = """Kamu adalah asisten admin toko plastik "{business_name}"
 yang lagi bikin Purchase Order (PO) BELANJA BAHAN ke supplier (bukan order
 dari customer). Baca teks dari admin dan ubah jadi JSON.
@@ -196,24 +218,47 @@ dari customer). Baca teks dari admin dan ubah jadi JSON.
 SUPPLIER YANG SUDAH PERNAH DIPAKAI:
 {suppliers}
 
+KATALOG PRODUK (HARUS dipakai buat cocokin item_code, meski admin nulis
+singkatan/gak lengkap -- misal "plastik sampah uk 90" itu cocok ke produk
+kategori SAMPAH yang ada angka 90 di Nama/Deskripsi-nya):
+{catalog}
+
 Balikin HANYA JSON dengan struktur persis seperti ini, tanpa teks lain:
 {{
   "nama_supplier": "nama supplier, judul huruf besar tiap kata",
   "items": [
-    {{"nama_item": "nama barang yang dibeli", "qty": angka, "satuan": "KG/Piece/dll", "harga_satuan": angka harga beli per satuan}}
+    {{"item_code": "KODE_DARI_KATALOG, kosong string kalau BENERAN gak ketemu match apapun", "nama_item": "nama PERSIS sesuai katalog kalau item_code ketemu, atau apa yang ditulis admin kalau gak ketemu", "qty": angka, "satuan": "sesuai katalog kalau ketemu, atau tebakan kalau gak ketemu", "harga_satuan": angka harga beli per satuan}}
   ],
-  "catatan": "catatan kalau ada yang ambigu, kalau tidak ada string kosong"
+  "catatan": "catatan kalau ada yang ambigu / item_code kosong, kalau tidak ada string kosong"
 }}
 
-Aturan: qty dan harga_satuan HARUS angka. Kalau harga gak disebutin, isi 0
-dan jelasin di catatan supaya admin isi manual.
+Aturan penting:
+1. item_code & nama_item WAJIB dicocokin ke KATALOG di atas kalau memang ada
+   yang cocok -- JANGAN nulis ulang/gabung sendiri nama & ukuran barang dari
+   tebakan kamu (contoh SALAH: admin nyebut "uk 90" lalu qty "100kg"
+   terpisah, JANGAN digabung jadi ukuran "90 x100" -- itu bukan dimensi
+   gabungan, "100kg" itu qty). Kalau ragu antara qty vs bagian dari nama
+   barang, PRIORITASKAN cocokin dulu ke katalog.
+2. Kalau BENERAN gak ada yang cocok di katalog, item_code dikosongin ("")
+   dan nama_item = persis apa yang ditulis admin, terus jelasin di catatan
+   biar admin cek manual.
+3. Aturan harga_satuan (urut prioritas):
+   a. Kalau teks admin EKSPLISIT nyebut harga, PAKAI itu -- menang dibanding
+      histori katalog.
+   b. Kalau teks gak nyebut harga tapi item_code ketemu & katalog punya
+      histori harga beli buat item itu, PAKAI harga beli terakhir itu.
+   c. Kalau item_code gak ketemu ATAU katalog belum punya histori harga
+      buat item itu, isi 0 dan jelasin di catatan supaya admin isi manual.
+
+qty dan harga_satuan HARUS angka (number), bukan string.
 """
 
 
-def parse_po_text(text, supplier_names):
+def parse_po_text(text, supplier_names, price_list=None):
     prompt = PO_SYSTEM_PROMPT.format(
         business_name=config.BUSINESS_NAME,
         suppliers=", ".join(supplier_names) if supplier_names else "(belum ada)",
+        catalog=_catalog_context_beli(price_list),
     )
     client = _get_client()
     resp = client.messages.create(
@@ -224,6 +269,59 @@ def parse_po_text(text, supplier_names):
     )
     raw = "".join(block.text for block in resp.content if block.type == "text")
     return _extract_json(raw)
+
+
+PO_PRICE_FILL_SYSTEM_PROMPT = """Kamu adalah asisten admin toko plastik "{business_name}".
+Ada PO (belanja ke supplier) yang lagi nunggu konfirmasi, tapi ada item yang
+harga beli-nya masih Rp0 (belum sempat diisi). Admin baru aja ngirim pesan
+susulan buat ngasih tau harganya -- baca pesan itu dan cocokin ke item yang
+harganya masih 0.
+
+ITEM DI PO INI (index dimulai dari 0, INDEX INI YANG DIPAKAI DI OUTPUT):
+{items}
+
+Balikin HANYA JSON persis struktur ini, tanpa teks lain:
+{{
+  "updates": [
+    {{"index": angka index item di atas, "harga_satuan": angka harga baru}}
+  ]
+}}
+
+Aturan:
+- Kalau pesan admin JELAS ngasih satu angka harga (misal "harga 18870",
+  "18870 aja", "harganya 18.870"), dan cuma ADA SATU item yang harganya
+  masih 0, pasangkan harga itu ke item tsb.
+- Kalau ada BEBERAPA item yang harganya masih 0 dan pesan nyebut beberapa
+  angka / nama barang, cocokin sebaik mungkin berdasarkan nama barang yang
+  disebut di pesan.
+- Kalau pesan SAMA SEKALI gak nyebut angka harga, atau gak nyambung sama
+  isi PO ini (misal itu obrolan lain), balikin "updates": [] (array kosong)
+  -- JANGAN maksa nebak.
+"""
+
+
+def parse_po_price_fill(text, items):
+    items_text = "\n".join(
+        f"{i}. {it.get('nama_item')} x{it.get('qty')} {it.get('satuan', '')} "
+        f"(harga sekarang: Rp{it.get('harga_satuan', 0)})"
+        for i, it in enumerate(items)
+    )
+    prompt = PO_PRICE_FILL_SYSTEM_PROMPT.format(
+        business_name=config.BUSINESS_NAME,
+        items=items_text or "(kosong)",
+    )
+    client = _get_client()
+    resp = client.messages.create(
+        model=config.CLAUDE_MODEL,
+        max_tokens=500,
+        system=prompt,
+        messages=[{"role": "user", "content": text}],
+    )
+    raw = "".join(block.text for block in resp.content if block.type == "text")
+    try:
+        return _extract_json(raw)
+    except AIResponseNotJSON:
+        return {"updates": []}
 
 
 INTENT_SYSTEM_PROMPT = """Kamu router pesan buat bot admin toko plastik

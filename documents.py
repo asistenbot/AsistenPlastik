@@ -89,28 +89,32 @@ def _wrap_text(draw, text, font, max_width):
     return lines or [""]
 
 
-def _load_logo(max_size=90):
-    if not os.path.exists(LOGO_PATH):
-        return None
-    logo = Image.open(LOGO_PATH).convert("RGBA")
-    logo.thumbnail((max_size, max_size))
-    return logo
+def _measure_wrap(text, font, max_width):
+    """Wrap teks tanpa butuh canvas final -- dipakai buat PRA-HITUNG berapa
+    baris & tinggi row yang dibutuhin SEBELUM bikin image (biar tinggi
+    gambar akurat kalau nama barangnya panjang dan perlu wrap ke beberapa
+    baris, gak ketiban kolom QTY/HARGA di sebelahnya)."""
+    dummy = Image.new("RGB", (10, 10))
+    d = ImageDraw.Draw(dummy)
+    return _wrap_text(d, text, font, max_width)
+
+
+def _plan_item_rows(items, font, col_width, base_row_h, line_gap, pad=12):
+    """Balikin (plan, total_height). plan = list of (lines, row_height) per
+    item, urut sama kayak items. Dipanggil sebelum bikin canvas."""
+    plan = []
+    total_h = 0
+    for it in items:
+        lines = _measure_wrap(str(it.get("nama_item", "")), font, col_width)
+        h = max(base_row_h, len(lines) * line_gap + pad)
+        plan.append((lines, h))
+        total_h += h
+    return plan, total_h
 
 
 def _header(draw, img, doc_title, doc_number, tanggal):
-    logo = _load_logo()
-    x = MARGIN
-    if logo is not None:
-        img.paste(logo, (x, MARGIN), logo)
-        x += logo.width + 20
-    draw.text((x, MARGIN), config.BUSINESS_NAME, font=F_BOLD(22), fill=INK)
-    addr_lines = _wrap_text(draw, config.BUSINESS_ADDRESS, F_SMALL(14), 380)
-    y = MARGIN + 30
-    for line in addr_lines[:2]:
-        draw.text((x, y), line, font=F_SMALL(14), fill=MUTED)
-        y += 19
-
-    # kanan atas: judul dokumen + nomor + tanggal
+    # Kiri atas sengaja dikosongin (gak nampilin logo/nama usaha lagi di kop
+    # dokumen) -- cuma judul dokumen + nomor + tanggal di kanan atas.
     title_w = draw.textlength(doc_title, font=F_TITLE(30))
     draw.text((WIDTH - MARGIN - title_w, MARGIN), doc_title, font=F_TITLE(30), fill=ACCENT)
     num_text = f"No. {doc_number}"
@@ -152,7 +156,10 @@ def generate_invoice_image(no_invoice, nama_customer, no_hp, alamat, metode, ite
     """items: list of dict {nama_item, qty, satuan, harga_satuan, subtotal}"""
     row_h = 30
     header_extra = 90  # info customer
-    height = 300 + header_extra + row_h * (len(items) + 1) + 160
+    item_font = F_REG(15)
+    item_col_w = 370  # kolom ITEM MARGIN+10..MARGIN+400, sisain jarak ke kolom QTY
+    plan, items_h = _plan_item_rows(items, item_font, item_col_w, row_h, 19)
+    height = 300 + header_extra + 34 + items_h + 160
     img = Image.new("RGB", (WIDTH, int(height)), BG)
     draw = ImageDraw.Draw(img)
 
@@ -181,11 +188,14 @@ def generate_invoice_image(no_invoice, nama_customer, no_hp, alamat, metode, ite
     y = _table_header(draw, y, columns)
 
     total = 0
-    for it in items:
+    for it, (lines, row_height) in zip(items, plan):
         subtotal = float(it["qty"]) * float(it["harga_satuan"])
         total += subtotal
         row_top = y
-        draw.text((MARGIN + 10, row_top + 6), str(it["nama_item"]), font=F_REG(15), fill=INK)
+        line_y = row_top + 6
+        for line in lines:
+            draw.text((MARGIN + 10, line_y), line, font=item_font, fill=INK)
+            line_y += 19
         qty_text = f"{it['qty']:g} {it.get('satuan', '')}".strip()
         qw = draw.textlength(qty_text, font=F_REG(15))
         draw.text((MARGIN + 400 + 90 - qw, row_top + 6), qty_text, font=F_REG(15), fill=INK)
@@ -196,7 +206,7 @@ def generate_invoice_image(no_invoice, nama_customer, no_hp, alamat, metode, ite
         sw = draw.textlength(sub_text, font=F_REG(15))
         col4_x, col4_w = MARGIN + 690, WIDTH - MARGIN - 10 - (MARGIN + 690)
         draw.text((col4_x + col4_w - sw, row_top + 6), sub_text, font=F_REG(15), fill=INK)
-        y += row_h
+        y += row_height
         draw.line([(MARGIN, y), (WIDTH - MARGIN, y)], fill=LINE, width=1)
 
     y += 16
@@ -235,7 +245,10 @@ def generate_invoice_image(no_invoice, nama_customer, no_hp, alamat, metode, ite
 def generate_surat_jalan_image(no_surat_jalan, nama_customer, no_hp, alamat, metode, items, no_invoice_ref=None):
     """items: list of dict {nama_item, qty, satuan} -- TANPA harga, buat kurir."""
     row_h = 32
-    height = 300 + row_h * (len(items) + 1) + 130
+    item_font = F_REG(16)
+    item_col_w = 690  # kolom ITEM MARGIN+10..MARGIN+720, sisain jarak ke kolom QTY
+    plan, items_h = _plan_item_rows(items, item_font, item_col_w, row_h, 20)
+    height = 300 + 34 + items_h + 130
     img = Image.new("RGB", (WIDTH, int(height)), BG)
     draw = ImageDraw.Draw(img)
 
@@ -265,14 +278,17 @@ def generate_surat_jalan_image(no_surat_jalan, nama_customer, no_hp, alamat, met
     ]
     y = _table_header(draw, y, columns)
 
-    for it in items:
+    for it, (lines, row_height) in zip(items, plan):
         row_top = y
-        draw.text((MARGIN + 10, row_top + 7), str(it["nama_item"]), font=F_REG(16), fill=INK)
+        line_y = row_top + 7
+        for line in lines:
+            draw.text((MARGIN + 10, line_y), line, font=item_font, fill=INK)
+            line_y += 20
         qty_text = f"{it['qty']:g} {it.get('satuan', '')}".strip()
         qw = draw.textlength(qty_text, font=F_REG(16))
         col2_x, col2_w = MARGIN + 720, WIDTH - MARGIN - 10 - (MARGIN + 720)
         draw.text((col2_x + col2_w - qw, row_top + 7), qty_text, font=F_REG(16), fill=INK)
-        y += row_h
+        y += row_height
         draw.line([(MARGIN, y), (WIDTH - MARGIN, y)], fill=LINE, width=1)
 
     y += 50
@@ -292,7 +308,10 @@ def generate_surat_jalan_image(no_surat_jalan, nama_customer, no_hp, alamat, met
 def generate_po_image(no_po, nama_supplier, items):
     """items: list of dict {nama_item, qty, satuan, harga_satuan}"""
     row_h = 30
-    height = 300 + row_h * (len(items) + 1) + 110
+    item_font = F_REG(15)
+    item_col_w = 370  # kolom ITEM MARGIN+10..MARGIN+400, sisain jarak ke kolom QTY
+    plan, items_h = _plan_item_rows(items, item_font, item_col_w, row_h, 19)
+    height = 300 + 34 + items_h + 110
     img = Image.new("RGB", (WIDTH, int(height)), BG)
     draw = ImageDraw.Draw(img)
 
@@ -312,11 +331,14 @@ def generate_po_image(no_po, nama_supplier, items):
     y = _table_header(draw, y, columns)
 
     total = 0
-    for it in items:
+    for it, (lines, row_height) in zip(items, plan):
         subtotal = float(it["qty"]) * float(it["harga_satuan"])
         total += subtotal
         row_top = y
-        draw.text((MARGIN + 10, row_top + 6), str(it["nama_item"]), font=F_REG(15), fill=INK)
+        line_y = row_top + 6
+        for line in lines:
+            draw.text((MARGIN + 10, line_y), line, font=item_font, fill=INK)
+            line_y += 19
         qty_text = f"{it['qty']:g} {it.get('satuan', '')}".strip()
         qw = draw.textlength(qty_text, font=F_REG(15))
         draw.text((MARGIN + 400 + 90 - qw, row_top + 6), qty_text, font=F_REG(15), fill=INK)
@@ -327,7 +349,7 @@ def generate_po_image(no_po, nama_supplier, items):
         sw = draw.textlength(sub_text, font=F_REG(15))
         col4_x, col4_w = MARGIN + 690, WIDTH - MARGIN - 10 - (MARGIN + 690)
         draw.text((col4_x + col4_w - sw, row_top + 6), sub_text, font=F_REG(15), fill=INK)
-        y += row_h
+        y += row_height
         draw.line([(MARGIN, y), (WIDTH - MARGIN, y)], fill=LINE, width=1)
 
     y += 16

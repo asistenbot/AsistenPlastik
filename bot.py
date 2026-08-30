@@ -56,7 +56,7 @@ def _sheets():
     return get_sheets_client()
 
 
-_PENDING_KEYS = ("pending_order", "pending_po", "pending_edit", "pending_price_update", "pending_cancel")
+_PENDING_KEYS = ("pending_order", "pending_po", "pending_edit", "pending_price_update", "pending_cancel", "pending_cancel_po")
 
 
 def _has_pending(context):
@@ -586,6 +586,8 @@ async def _route_text(update, context, text):
         await _do_edit_order(update, context, target, text)
     elif intent == "batal_order":
         await _do_cancel_order(update, context, target)
+    elif intent == "batal_po":
+        await _do_cancel_po(update, context, target)
     elif intent == "update_harga":
         await _do_update_harga(update, context, text)
     elif intent == "po":
@@ -784,6 +786,51 @@ async def _do_cancel_order(update, context, target):
         f"Yakin mau batalin *{no_invoice}* ({rows[0].get('Nama_Customer', '-')}, "
         f"total {rupiah(total)})? Order ditandai *Batal* (datanya tetep ada buat "
         "histori, tapi otomatis keluar dari piutang).",
+        reply_markup=kb,
+    )
+
+
+async def _do_cancel_po(update, context, target):
+    sheets = _sheets()
+
+    no_po = None
+    if target and target.upper().startswith(config.PO_PREFIX):
+        no_po = target
+    if not no_po:
+        no_po = context.user_data.get("last_po")
+    if not no_po and target:
+        no_po = sheets.get_latest_po_for_supplier(target)
+    if not no_po:
+        await update.effective_message.reply_text(
+            "PO yang mana yang mau dibatalin? Sebutin nomor PO-nya atau nama supplier-nya."
+        )
+        return
+
+    rows = sheets.get_po_items(no_po)
+    if not rows:
+        await update.effective_message.reply_text(f"PO {no_po} gak ketemu.")
+        return
+    if str(rows[0].get("Status", "")) == "Batal":
+        await update.effective_message.reply_text(f"{no_po} udah dibatalin sebelumnya.")
+        return
+
+    total = 0.0
+    for r in rows:
+        try:
+            total += float(r.get("Subtotal", 0) or 0)
+        except ValueError:
+            pass
+
+    context.user_data["pending_cancel_po"] = no_po
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Ya, Batalin", callback_data="cancelpo_confirm"),
+        InlineKeyboardButton("❌ Jangan Dulu", callback_data="cancelpo_cancel"),
+    ]])
+    await _send_text(
+        update,
+        f"Yakin mau batalin *{no_po}* ({rows[0].get('Nama_Supplier', '-')}, "
+        f"total {rupiah(total)})? PO ditandai *Batal* (datanya tetep ada buat "
+        "histori, tapi utang ke supplier ini otomatis dibalikin/dikurangin lagi).",
         reply_markup=kb,
     )
 
@@ -1057,6 +1104,28 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"✅ {no_invoice} udah ditandai *Batal*.", parse_mode=ParseMode.MARKDOWN)
         return
 
+    if data == "cancelpo_cancel":
+        context.user_data.pop("pending_cancel_po", None)
+        await query.edit_message_text("Oke, gak jadi dibatalin.")
+        return
+
+    if data == "cancelpo_confirm":
+        no_po = context.user_data.pop("pending_cancel_po", None)
+        if not no_po:
+            await query.edit_message_text("Udah gak ada PO yang nunggu dibatalin, coba ulang.")
+            return
+        sheets = _sheets()
+        ok, nama_supplier, total = sheets.cancel_po(no_po)
+        if not ok:
+            await query.edit_message_text(f"PO {no_po} gak ketemu lagi.")
+            return
+        await query.edit_message_text(
+            f"✅ {no_po} udah ditandai *Batal*. Utang ke *{nama_supplier}* otomatis "
+            f"dikurangin {rupiah(total)}.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
     if data == "priceupdate_cancel":
         context.user_data.pop("pending_price_update", None)
         await query.edit_message_text("Gak jadi diubah.")
@@ -1121,6 +1190,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         sheets = _sheets()
         no_po, total = sheets.add_purchase_order(parsed.get("nama_supplier", "-"), parsed["items"])
+        context.user_data["last_po"] = no_po
         await query.edit_message_text(
             f"✅ PO *{no_po}* disimpan ({rupiah(total)}), otomatis nambah utang ke supplier ini.",
             parse_mode=ParseMode.MARKDOWN,

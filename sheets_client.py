@@ -541,6 +541,66 @@ class SheetsClient:
     def get_po_items(self, no_po):
         return [r for r in self.get_all_pos() if str(r.get("No_PO", "")) == no_po]
 
+    def get_pos_by_supplier(self, nama_supplier, exclude_status=None):
+        nama_lower = (nama_supplier or "").strip().lower()
+        out = []
+        for r in self.get_all_pos():
+            if str(r.get("Nama_Supplier", "")).strip().lower() != nama_lower:
+                continue
+            if exclude_status and str(r.get("Status", "")) == exclude_status:
+                continue
+            out.append(r)
+        return out
+
+    def get_latest_po_for_supplier(self, nama_supplier):
+        """Cari No_PO PALING BARU buat supplier ini yang BELUM dibatalin.
+        Coba exact match nama dulu, kalau gak ketemu coba loose-contains
+        (biar 'CSB' bisa nemu 'CSB' walau dari sisi lain penulisan agak beda)."""
+        pos = self.get_pos_by_supplier(nama_supplier, exclude_status="Batal")
+        if not pos:
+            nama_lower = (nama_supplier or "").strip().lower()
+            if nama_lower:
+                pos = [
+                    r for r in self.get_all_pos()
+                    if nama_lower in str(r.get("Nama_Supplier", "")).strip().lower()
+                    and str(r.get("Status", "")) != "Batal"
+                ]
+        if not pos:
+            return None
+        return sorted(pos, key=lambda r: str(r.get("Timestamp", "")))[-1].get("No_PO")
+
+    def cancel_po(self, no_po):
+        """Tandai semua baris No_PO ini Status='Batal', dan balikin (reverse)
+        utang yang otomatis kecatet pas PO ini disimpan -- biar PO yang
+        batal gak lagi keitung di utang supplier. Balikin
+        (found, nama_supplier, total)."""
+        ws = self._ws(config.SHEET_PURCHASE_ORDERS)
+        headers = ws.row_values(1)
+        col_po = headers.index("No_PO") + 1
+        col_status = headers.index("Status") + 1
+        col_supplier = headers.index("Nama_Supplier") + 1
+        col_subtotal = headers.index("Subtotal") + 1
+        all_values = ws.get_all_values()
+        found = False
+        nama_supplier = ""
+        total = 0.0
+        for idx, row in enumerate(all_values[1:], start=2):
+            if len(row) < col_po or row[col_po - 1] != no_po:
+                continue
+            if row[col_status - 1] == "Batal":
+                continue  # udah dibatalin sebelumnya, jangan dobel reverse utang
+            found = True
+            nama_supplier = row[col_supplier - 1]
+            try:
+                total += float(row[col_subtotal - 1] or 0)
+            except (TypeError, ValueError):
+                pass
+            ws.update_cell(idx, col_status, "Batal")
+        if found and total:
+            with self._lock:
+                self._add_utang_entry(nama_supplier, no_po, "Batal PO", total, "PO dibatalin, utang dibalikin")
+        return found, nama_supplier, total
+
     def mark_po_lunas(self, no_po):
         ws = self._ws(config.SHEET_PURCHASE_ORDERS)
         headers = ws.row_values(1)
@@ -569,7 +629,7 @@ class SheetsClient:
                 jumlah = 0
             if r.get("Jenis") == "Utang Baru":
                 total += jumlah
-            elif r.get("Jenis") == "Pembayaran":
+            elif r.get("Jenis") in ("Pembayaran", "Batal PO"):
                 total -= jumlah
         return total
 

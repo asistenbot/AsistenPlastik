@@ -359,12 +359,18 @@ Daftar intent yang valid:
   yang dibeli sama sekali. Kalau pesannya cuma nyebut 1-2 kata nama orang
   atau tempat tanpa daftar barang (misal cuma "edit Grandia Hotel"), itu
   edit_order, BUKAN order.
-- "batal_order" -- admin mau BATALIN/HAPUS SELURUH order/invoice yang SUDAH
-  kesimpen (misal order test yang mau dibuang, atau customer batal jadi
-  beli), BUKAN betulin satu-dua data yang salah ketik (itu edit_order).
+- "batal_order" -- admin mau BATALIN/HAPUS SELURUH order/invoice CUSTOMER
+  yang SUDAH kesimpen (misal order test yang mau dibuang, atau customer
+  batal jadi beli), BUKAN betulin satu-dua data yang salah ketik (itu
+  edit_order), dan BUKAN batalin PO ke supplier (itu "batal_po" di bawah).
   Ciri-cirinya: kata "hapus", "batalin", "cancel", "gak jadi", diikuti
-  referensi ke order/invoice/customer tertentu, TANPA nyebut field
-  spesifik apa yang mau diganti isinya.
+  referensi ke order/invoice/customer tertentu (BUKAN kata "PO" atau nama
+  supplier), TANPA nyebut field spesifik apa yang mau diganti isinya.
+- "batal_po" -- admin mau BATALIN/HAPUS PO (belanja ke SUPPLIER) yang SUDAH
+  kesimpen. Ciri-cirinya: kata "hapus", "batalin", "cancel", "gak jadi"
+  diikuti kata "PO" secara eksplisit dan/atau nama SUPPLIER (bukan
+  customer). Contoh: "hapus PO CSB", "batalin PO ke CSB", "PO nya gak jadi",
+  "cancel PO-20260830-001".
 - "update_harga" -- admin mau UBAH HARGA JUAL dan/atau HARGA BELI produk di
   katalog/PriceList (bukan order dari customer, bukan PO/belanja ke
   supplier). Ciri-cirinya: nyebut nama/kode barang + harga/angka rupiah,
@@ -385,10 +391,12 @@ Daftar intent yang valid:
 Kalau ragu antara "order" dan intent lain, PILIH "order" (lebih aman salah
 nanya balik daripada order customer keskip) -- KECUALI kalau pesannya
 diawali kata edit/ganti/betulin/koreksi dan gak nyebut barang (itu
-edit_order), diawali hapus/batalin/cancel tanpa nyebut field spesifik
-(itu batal_order), atau nyebut barang/daftar harga + kata "masukin"/
-"update"/"harga" TANPA qty barang yang mau dibeli sekarang (itu
-update_harga, WALAUPUN ada nama supplier disebut sebagai sumber datanya).
+edit_order), diawali hapus/batalin/cancel yang nyebut "PO" atau nama
+supplier (itu batal_po), diawali hapus/batalin/cancel tanpa nyebut "PO"/
+supplier dan tanpa nyebut field spesifik (itu batal_order), atau nyebut
+barang/daftar harga + kata "masukin"/"update"/"harga" TANPA qty barang
+yang mau dibeli sekarang (itu update_harga, WALAUPUN ada nama supplier
+disebut sebagai sumber datanya).
 Kalau pesan cuma sapaan atau gak jelas sama sekali, pilih "lainnya".
 """
 

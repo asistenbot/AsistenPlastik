@@ -35,6 +35,7 @@ SCHEMA = {
         "Timestamp", "No_Invoice", "Nama_Customer", "No_HP", "Alamat",
         "Metode", "Item_Code", "Nama_Item", "Kategori", "Qty", "Satuan",
         "Harga_Satuan", "Subtotal", "Ongkir", "Status", "Tanggal_Bayar",
+        "No_PO_Customer", "Tanggal_Kirim",
     ],
     config.SHEET_SUPPLIERS: ["Nama_Supplier", "No_HP", "Barang", "Alamat"],
     config.SHEET_PURCHASE_ORDERS: [
@@ -88,6 +89,14 @@ class SheetsClient:
                 first_row = ws.row_values(1)
                 if not first_row:
                     ws.append_row(headers, value_input_option="RAW")
+                else:
+                    # Migrasi kolom baru: kalau ada nama kolom di SCHEMA yang
+                    # belum ada di header Sheets yang UDAH jalan (bukan tab
+                    # baru), tambahin di ujung kanan -- data lama gak
+                    # kesentuh, cuma kolom baru nambah kosong buat baris lama.
+                    missing = [h for h in headers if h not in first_row]
+                    if missing:
+                        ws.update("A1", [first_row + missing])
 
         # kalau spreadsheet baru dibuat gspread nyisain tab default "Sheet1"
         # kosong -- hapus biar rapi (aman diabaikan kalau gagal/gak ada).
@@ -365,10 +374,13 @@ class SheetsClient:
     def get_all_orders(self):
         return self._records(self._ws(config.SHEET_ORDERS))
 
-    def add_order(self, nama_customer, no_hp, alamat, metode, items, ongkir=0):
+    def add_order(self, nama_customer, no_hp, alamat, metode, items, ongkir=0,
+                  no_po_customer="", tanggal_kirim=""):
         """items: list of dict {item_code, nama_item, kategori, qty, satuan,
         harga_satuan}. Nulis 1 baris per item, semuanya share No_Invoice yang
-        sama. Balikin no_invoice yang dipakai."""
+        sama. no_po_customer/tanggal_kirim opsional (referensi No. PO dari
+        customer & tanggal request kirim, kalau ada). Balikin no_invoice
+        yang dipakai."""
         with self._lock:
             no_invoice = self.next_invoice_number()
             ts = _now_str()
@@ -382,6 +394,7 @@ class SheetsClient:
                     it["qty"], it.get("satuan", ""), it["harga_satuan"], subtotal,
                     ongkir if idx == 0 else 0,  # ongkir cuma dicatat 1x di baris pertama
                     "Pending", "",
+                    no_po_customer, tanggal_kirim,
                 ])
             ws.append_rows(rows, value_input_option="RAW")
             self.add_customer_if_new(nama_customer, no_hp, alamat)
@@ -446,8 +459,9 @@ class SheetsClient:
 
     def edit_order_header(self, no_invoice, updates):
         """Betulin data header order yang SUDAH kesimpen (nama customer, no
-        HP, alamat, dan/atau metode) -- BUKAN item/qty/harga. `updates` dict
-        subset dari {nama_customer, no_hp, alamat, metode} -> nilai baru,
+        HP, alamat, metode, no_po_customer, dan/atau tanggal_kirim) -- BUKAN
+        item/qty/harga. `updates` dict subset dari {nama_customer, no_hp,
+        alamat, metode, no_po_customer, tanggal_kirim} -> nilai baru,
         cuma field yang ada isinya yang diupdate. Update semua baris yang
         share No_Invoice ini (1 order = beberapa baris, 1 per item).
         Balikin True kalau invoice ketemu & keupdate, False kalau enggak
@@ -457,6 +471,8 @@ class SheetsClient:
             "no_hp": "No_HP",
             "alamat": "Alamat",
             "metode": "Metode",
+            "no_po_customer": "No_PO_Customer",
+            "tanggal_kirim": "Tanggal_Kirim",
         }
         ws = self._ws(config.SHEET_ORDERS)
         headers = ws.row_values(1)

@@ -72,8 +72,8 @@ def _empty_order_result(raw_text):
         catatan += f"\n\nJawaban AI: {cuplikan}"
     return {
         "nama_customer": "", "no_hp": "", "alamat": "", "metode": "Kirim",
-        "items": [], "ongkir": 0, "catatan": catatan,
-        "perlu_konfirmasi_manual": True,
+        "items": [], "ongkir": 0, "no_po_customer": "", "tanggal_kirim": "",
+        "catatan": catatan, "perlu_konfirmasi_manual": True,
     }
 
 
@@ -121,6 +121,8 @@ Balikin HANYA JSON dengan struktur persis seperti ini, tanpa teks lain:
     {{"item_code": "KODE_DARI_KATALOG", "nama_item": "nama sesuai katalog", "qty": angka}}
   ],
   "ongkir": 0,
+  "no_po_customer": "nomor PO/Purchase Order MILIK CUSTOMER kalau ada (misal kalau fotonya adalah dokumen resmi 'Purchase Order' dari customer dengan field 'Purchase Number'/'PO Number'/'No. PO', ambil nomornya persis), kalau gak ada string kosong",
+  "tanggal_kirim": "tanggal customer MINTA dikirim/diambil kalau disebut eksplisit (dari teks admin, atau dari field 'Required Date'/'Due Date'/'Delivery Date' di dokumen PO customer kalau ada), format bebas tapi jelas (misal '20 September 2026'), kalau gak disebut string kosong",
   "catatan": "catatan buat admin kalau ada yang ambigu/gak yakin, kalau tidak ada string kosong",
   "perlu_konfirmasi_manual": false
 }}
@@ -132,6 +134,8 @@ Aturan penting:
   nama_item = apa yang disebut customer, terus set perlu_konfirmasi_manual
   jadi true dan jelasin di "catatan".
 - Ongkir default 0 kecuali disebutin jelas nominalnya.
+- no_po_customer & tanggal_kirim itu OPSIONAL -- JANGAN mengarang, kosongin
+  kalau memang gak disebut/gak keliatan di teks atau foto.
 - Jangan hitung subtotal/total, itu dihitung sistem lain.
 """
 
@@ -430,6 +434,8 @@ ini, tanpa teks lain:
   "no_hp": "nilai baru kalau no HP mau diganti, string kosong kalau TIDAK diganti",
   "alamat": "nilai baru kalau alamat mau diganti, string kosong kalau TIDAK diganti",
   "metode": "'Kirim' atau 'Ambil' kalau metode mau diganti, string kosong kalau TIDAK diganti",
+  "no_po_customer": "nilai baru kalau No. PO Customer mau diganti/ditambahin, string kosong kalau TIDAK diganti",
+  "tanggal_kirim": "nilai baru kalau tanggal kirim mau diganti/ditambahin, string kosong kalau TIDAK diganti",
   "items": [
     {{
       "item_code": "kode item (dari daftar ITEM DI ORDER INI di atas) yang mau diganti",
@@ -479,6 +485,67 @@ def parse_order_correction(instruction_text, current_order_desc):
     )
     raw = "".join(block.text for block in resp.content if block.type == "text")
     return _extract_json(raw)
+
+
+PENDING_ORDER_CORRECTION_SYSTEM_PROMPT = """Kamu asisten admin toko plastik "{business_name}".
+Ada ORDER BARU yang lagi di-PREVIEW (BELUM disimpan/dikonfirmasi -- masih
+bebas dikoreksi sebelum admin pencet tombol Simpan). Admin barusan ngirim
+pesan susulan yang KEMUNGKINAN adalah koreksi ke preview ini.
+
+PREVIEW ORDER SAAT INI:
+{current}
+
+Baca pesan admin, balikin HANYA JSON persis struktur ini, tanpa teks lain:
+{{
+  "header_updates": {{
+    "nama_customer": "nilai baru kalau nama customer mau diganti, string kosong kalau TIDAK diganti",
+    "no_hp": "nilai baru kalau no HP mau diganti, string kosong kalau TIDAK diganti",
+    "alamat": "nilai baru kalau alamat mau diganti, string kosong kalau TIDAK diganti",
+    "metode": "'Kirim' atau 'Ambil' kalau metode mau diganti, string kosong kalau TIDAK diganti",
+    "no_po_customer": "nilai baru kalau No. PO Customer mau diganti/ditambahin, string kosong kalau TIDAK diganti",
+    "tanggal_kirim": "nilai baru kalau tanggal kirim mau diganti/ditentuin, string kosong kalau TIDAK diganti",
+    "ongkir": angka ongkir baru kalau mau diganti, -1 kalau TIDAK diganti
+  }},
+  "item_updates": [
+    {{"index": angka index item di ITEM DI ORDER INI di atas (0-based, urut dari atas), "qty": angka qty baru atau null kalau TIDAK diganti, "harga_satuan": angka harga satuan baru atau null kalau TIDAK diganti}}
+  ],
+  "matched": true kalau ADA SESUATU yang match jadi koreksi (header atau item), false kalau pesan ini SAMA SEKALI gak nyambung ke koreksi preview order ini
+}}
+
+Aturan penting:
+- JANGAN mengarang perubahan buat field yang gak disebut -- biarin default
+  (string kosong / -1 / null).
+- item_updates cuma diisi kalau admin EKSPLISIT nyebut mau ganti qty
+  dan/atau harga SALAH SATU item yang UDAH ada di preview ini. Kalau cuma
+  ada 1 item di preview dan admin nyebut qty/harga baru tanpa nama barang,
+  itu item itu yang dimaksud (index 0).
+- Kalau pesan ini sebenernya mau NAMBAH barang baru (bukan koreksi item
+  yang udah ada), atau sama sekali gak nyambung ke koreksi apapun (basa-
+  basi/obrolan lain), set matched=false dan biarin semua field default --
+  JANGAN maksa nebak.
+- Kalau admin nyebut "harganya di update"/"harganya berubah" TAPI GAK
+  NYEBUT ANGKA BARUNYA SAMA SEKALI, JANGAN NEBAK -- biarin harga_satuan
+  item itu null.
+"""
+
+
+def parse_pending_order_correction(text, current_order_desc):
+    prompt = PENDING_ORDER_CORRECTION_SYSTEM_PROMPT.format(
+        business_name=config.BUSINESS_NAME,
+        current=current_order_desc,
+    )
+    client = _get_client()
+    resp = client.messages.create(
+        model=config.CLAUDE_MODEL,
+        max_tokens=400,
+        system=prompt,
+        messages=[{"role": "user", "content": text}],
+    )
+    raw = "".join(block.text for block in resp.content if block.type == "text")
+    try:
+        return _extract_json(raw)
+    except AIResponseNotJSON:
+        return {"header_updates": {}, "item_updates": [], "matched": False}
 
 
 PRICE_UPDATE_SYSTEM_PROMPT = """Kamu asisten admin toko plastik "{business_name}".

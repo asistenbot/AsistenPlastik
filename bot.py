@@ -24,7 +24,7 @@ import documents
 from ai_parser import (
     parse_order_text, parse_order_image, parse_po_text, classify_intent,
     parse_order_correction, parse_price_update, parse_price_update_image,
-    parse_po_price_fill,
+    parse_po_price_fill, parse_pending_order_correction,
 )
 from sheets_client import get_sheets_client
 
@@ -79,6 +79,10 @@ def _order_preview_text(parsed):
     if parsed.get("alamat"):
         lines.append(f"Alamat: {parsed['alamat']}")
     lines.append(f"Metode: {parsed.get('metode', 'Kirim')}")
+    if parsed.get("no_po_customer"):
+        lines.append(f"No. PO Customer: {parsed['no_po_customer']}")
+    if parsed.get("tanggal_kirim"):
+        lines.append(f"Tanggal Kirim: {parsed['tanggal_kirim']}")
     lines.append("")
     total = 0
     for it in parsed.get("items", []):
@@ -397,6 +401,8 @@ async def _kirim_invoice(update, context, no_invoice):
     img, pdf = documents.generate_invoice_image(
         no_invoice, first["Nama_Customer"], first.get("No_HP", ""), first.get("Alamat", ""),
         first.get("Metode", "Kirim"), items, ongkir,
+        no_po_customer=first.get("No_PO_Customer", ""),
+        tanggal_kirim=first.get("Tanggal_Kirim", ""),
     )
     await update.effective_message.reply_photo(photo=img, caption=f"Invoice {no_invoice}")
     await update.effective_message.reply_document(
@@ -416,6 +422,8 @@ async def _kirim_surat_jalan(update, context, no_invoice):
     img, pdf = documents.generate_surat_jalan_image(
         no_sj, first["Nama_Customer"], first.get("No_HP", ""), first.get("Alamat", ""),
         first.get("Metode", "Kirim"), items, no_invoice_ref=no_invoice,
+        no_po_customer=first.get("No_PO_Customer", ""),
+        tanggal_kirim=first.get("Tanggal_Kirim", ""),
     )
     await update.effective_message.reply_photo(photo=img, caption=f"Surat Jalan {no_sj}")
     await update.effective_message.reply_document(
@@ -533,6 +541,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if await _try_fill_po_price(update, context, pending_po, text):
             return
 
+    pending_order = context.user_data.get("pending_order")
+    other_pending_for_order = any(context.user_data.get(k) for k in _PENDING_KEYS if k != "pending_order")
+    if pending_order and not other_pending_for_order:
+        if await _try_correct_pending_order(update, context, pending_order, text):
+            return
+
     if _has_pending(context):
         await update.effective_message.reply_text(
             "Masih ada order/PO/perubahan yang nunggu konfirmasi di atas. Klik tombolnya dulu, atau /batal buat batalin."
@@ -633,10 +647,12 @@ async def _process_order_text(update, context, text):
 _EDIT_FIELD_LABEL = {
     "nama_customer": "Nama Customer", "no_hp": "No HP",
     "alamat": "Alamat", "metode": "Metode",
+    "no_po_customer": "No. PO Customer", "tanggal_kirim": "Tanggal Kirim",
 }
 _EDIT_FIELD_COLUMN = {
     "nama_customer": "Nama_Customer", "no_hp": "No_HP",
     "alamat": "Alamat", "metode": "Metode",
+    "no_po_customer": "No_PO_Customer", "tanggal_kirim": "Tanggal_Kirim",
 }
 
 
@@ -674,6 +690,8 @@ async def _do_edit_order(update, context, target, text):
         f"No HP: {first.get('No_HP', '')}\n"
         f"Alamat: {first.get('Alamat', '')}\n"
         f"Metode: {first.get('Metode', '')}\n"
+        f"No. PO Customer: {first.get('No_PO_Customer', '')}\n"
+        f"Tanggal Kirim: {first.get('Tanggal_Kirim', '')}\n"
         f"ITEM DI ORDER INI:\n{items_desc}"
     )
     try:
@@ -683,7 +701,7 @@ async def _do_edit_order(update, context, target, text):
         await update.effective_message.reply_text(f"Waduh, gagal baca koreksinya: {e}")
         return
 
-    header_fields = {"nama_customer", "no_hp", "alamat", "metode"}
+    header_fields = {"nama_customer", "no_hp", "alamat", "metode", "no_po_customer", "tanggal_kirim"}
     updates = {
         k: (v or "").strip() for k, v in corr.items()
         if k in header_fields and (v or "").strip()
@@ -1047,6 +1065,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         no_invoice = sheets.add_order(
             parsed.get("nama_customer", "-"), parsed.get("no_hp", ""), parsed.get("alamat", ""),
             parsed.get("metode", "Kirim"), parsed["items"], ongkir=parsed.get("ongkir", 0) or 0,
+            no_po_customer=parsed.get("no_po_customer", "") or "",
+            tanggal_kirim=parsed.get("tanggal_kirim", "") or "",
         )
         context.user_data["last_invoice"] = no_invoice
         await query.edit_message_text(f"✅ Order disimpan sebagai *{no_invoice}*. Lagi bikin invoice & surat jalan...", parse_mode=ParseMode.MARKDOWN)
@@ -1277,6 +1297,91 @@ async def _try_fill_po_price(update, context, pending, text):
     await _send_text(
         update,
         f"Oke, harga *{', '.join(applied)}* udah keisi.\n\n" + _po_preview_text(pending),
+        reply_markup=kb,
+    )
+    return True
+
+
+def _pending_order_desc(parsed):
+    items_desc = "\n".join(
+        f"  {i}. {it.get('nama_item', '')} | qty {it.get('qty', '')} {it.get('satuan', '')} "
+        f"| harga satuan Rp{it.get('harga_satuan', 0)}"
+        for i, it in enumerate(parsed.get("items", []))
+    )
+    return (
+        f"Nama Customer: {parsed.get('nama_customer', '')}\n"
+        f"No HP: {parsed.get('no_hp', '')}\n"
+        f"Alamat: {parsed.get('alamat', '')}\n"
+        f"Metode: {parsed.get('metode', '')}\n"
+        f"No. PO Customer: {parsed.get('no_po_customer', '')}\n"
+        f"Tanggal Kirim: {parsed.get('tanggal_kirim', '')}\n"
+        f"Ongkir: {parsed.get('ongkir', 0)}\n"
+        f"ITEM DI ORDER INI:\n{items_desc}"
+    )
+
+
+async def _try_correct_pending_order(update, context, pending, text):
+    """Kalau ada pending_order yang lagi nunggu konfirmasi (BELUM di-Simpan),
+    coba baca pesan susulan admin sebagai KOREKSI ke preview ini -- misal
+    ganti alamat/qty/harga/tanggal kirim -- sebelum dikonfirmasi. Balikin
+    True kalau berhasil match & preview baru udah dikirim, False kalau
+    pesan gak nyambung sama sekali (biar fallback ke pesan pending generik
+    yang lama)."""
+    try:
+        corr = parse_pending_order_correction(text, _pending_order_desc(pending))
+    except Exception:
+        logger.exception("gagal parse koreksi pending order")
+        return False
+    if not corr.get("matched"):
+        return False
+
+    changed = []
+    header_updates = corr.get("header_updates") or {}
+    for field in ("nama_customer", "no_hp", "alamat", "metode", "no_po_customer", "tanggal_kirim"):
+        val = (header_updates.get(field) or "").strip()
+        if val:
+            pending[field] = val
+            changed.append(_EDIT_FIELD_LABEL.get(field, field))
+    try:
+        ongkir_baru = float(header_updates.get("ongkir"))
+    except (TypeError, ValueError):
+        ongkir_baru = -1
+    if ongkir_baru >= 0:
+        pending["ongkir"] = ongkir_baru
+        changed.append("Ongkir")
+
+    items = pending.get("items", [])
+    for iu in corr.get("item_updates") or []:
+        try:
+            idx = int(iu.get("index"))
+        except (TypeError, ValueError):
+            continue
+        if not (0 <= idx < len(items)):
+            continue
+        if iu.get("qty") is not None:
+            try:
+                items[idx]["qty"] = float(iu["qty"])
+                changed.append(f"Qty {items[idx].get('nama_item', '')}")
+            except (TypeError, ValueError):
+                pass
+        if iu.get("harga_satuan") is not None:
+            try:
+                items[idx]["harga_satuan"] = float(iu["harga_satuan"])
+                changed.append(f"Harga {items[idx].get('nama_item', '')}")
+            except (TypeError, ValueError):
+                pass
+
+    if not changed:
+        return False
+
+    context.user_data["pending_order"] = pending
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Simpan", callback_data="order_confirm"),
+        InlineKeyboardButton("❌ Batal", callback_data="order_cancel"),
+    ]])
+    await _send_text(
+        update,
+        f"Oke, *{', '.join(changed)}* udah diupdate.\n\n" + _order_preview_text(pending),
         reply_markup=kb,
     )
     return True

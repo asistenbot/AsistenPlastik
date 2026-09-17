@@ -152,10 +152,13 @@ def _now_tanggal():
     return f"{hari}, {now.day} {['','Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'][now.month]} {now.year}"
 
 
-def generate_invoice_image(no_invoice, nama_customer, no_hp, alamat, metode, items, ongkir=0):
-    """items: list of dict {nama_item, qty, satuan, harga_satuan, subtotal}"""
+def generate_invoice_image(no_invoice, nama_customer, no_hp, alamat, metode, items, ongkir=0,
+                            no_po_customer="", tanggal_kirim=""):
+    """items: list of dict {nama_item, qty, satuan, harga_satuan, subtotal}.
+    no_po_customer/tanggal_kirim opsional -- ditampilin kalau ada."""
     row_h = 30
-    header_extra = 90  # info customer
+    extra_lines = (1 if no_po_customer else 0) + (1 if tanggal_kirim else 0)
+    header_extra = 90 + extra_lines * 19  # info customer (+ baris tambahan kalau ada)
     item_font = F_REG(15)
     item_col_w = 370  # kolom ITEM MARGIN+10..MARGIN+400, sisain jarak ke kolom QTY
     plan, items_h = _plan_item_rows(items, item_font, item_col_w, row_h, 19)
@@ -177,7 +180,14 @@ def generate_invoice_image(no_invoice, nama_customer, no_hp, alamat, metode, ite
             draw.text((MARGIN, y), line, font=F_REG(14), fill=MUTED)
             y += 19
     draw.text((MARGIN, y), f"Metode: {metode}", font=F_REG(14), fill=MUTED)
-    y += 30
+    y += 19
+    if no_po_customer:
+        draw.text((MARGIN, y), f"No. PO Customer: {no_po_customer}", font=F_REG(14), fill=MUTED)
+        y += 19
+    if tanggal_kirim:
+        draw.text((MARGIN, y), f"Tanggal Kirim: {tanggal_kirim}", font=F_REG(14), fill=MUTED)
+        y += 19
+    y += 11
 
     columns = [
         ("ITEM", MARGIN + 10, 380, "left"),
@@ -242,13 +252,17 @@ def generate_invoice_image(no_invoice, nama_customer, no_hp, alamat, metode, ite
     return png_buf, pdf_buf
 
 
-def generate_surat_jalan_image(no_surat_jalan, nama_customer, no_hp, alamat, metode, items, no_invoice_ref=None):
-    """items: list of dict {nama_item, qty, satuan} -- TANPA harga, buat kurir."""
+def generate_surat_jalan_image(no_surat_jalan, nama_customer, no_hp, alamat, metode, items,
+                                no_invoice_ref=None, no_po_customer="", tanggal_kirim=""):
+    """items: list of dict {nama_item, qty, satuan} -- TANPA harga, buat kurir.
+    no_po_customer/tanggal_kirim opsional -- ditampilin kalau ada."""
     row_h = 32
+    extra_lines = (1 if no_po_customer else 0) + (1 if tanggal_kirim else 0)
+    height_extra = extra_lines * 19
     item_font = F_REG(16)
     item_col_w = 690  # kolom ITEM MARGIN+10..MARGIN+720, sisain jarak ke kolom QTY
     plan, items_h = _plan_item_rows(items, item_font, item_col_w, row_h, 20)
-    height = 300 + 34 + items_h + 130
+    height = 300 + 34 + items_h + 130 + height_extra
     img = Image.new("RGB", (WIDTH, int(height)), BG)
     draw = ImageDraw.Draw(img)
 
@@ -269,6 +283,12 @@ def generate_surat_jalan_image(no_surat_jalan, nama_customer, no_hp, alamat, met
     y += 20
     if no_invoice_ref:
         draw.text((MARGIN, y), f"Ref. Invoice: {no_invoice_ref}", font=F_REG(14), fill=MUTED)
+        y += 19
+    if no_po_customer:
+        draw.text((MARGIN, y), f"Ref. PO Customer: {no_po_customer}", font=F_REG(14), fill=MUTED)
+        y += 19
+    if tanggal_kirim:
+        draw.text((MARGIN, y), f"Tanggal Kirim: {tanggal_kirim}", font=F_BOLD(14), fill=INK)
         y += 19
     y += 10
 

@@ -121,6 +121,19 @@ def _po_preview_text(parsed):
     return "\n".join(lines)
 
 
+def _item_label(row):
+    """Nama barang buat ditampilin di invoice/surat jalan/PO -- gabungin Nama
+    sama Deskripsi dari PriceList (misal 'Sablon 1 Sisi' vs 'Sablon 2 Sisi')
+    kalau ada, soalnya ada produk yang Nama-nya SAMA PERSIS tapi beda varian
+    sablon/keterangan (dibedain lewat Item_Code & Deskripsi aja). 'POLOS'
+    gak ditampilin biar gak nambah noise di barang yang emang polosan."""
+    nama = row.get("Nama", "") or ""
+    deskripsi = str(row.get("Deskripsi", "") or "").strip()
+    if deskripsi and deskripsi.upper() != "POLOS":
+        return f"{nama} ({deskripsi})"
+    return nama
+
+
 def _resolve_po_items_with_catalog(parsed_items, sheets):
     """Setelah AI baca teks PO, cocokin ULANG tiap item ke katalog PriceList
     (via item_code yang dikasih AI, atau find_product kalau item_code kosong)
@@ -150,7 +163,7 @@ def _resolve_po_items_with_catalog(parsed_items, sheets):
                     harga = 0
             resolved.append({
                 "item_code": row["Item_Code"],
-                "nama_item": row["Nama"],
+                "nama_item": _item_label(row),
                 "satuan": row.get("Satuan", it.get("satuan", "")),
                 "harga_satuan": harga,
                 "qty": it.get("qty", 0),
@@ -181,7 +194,7 @@ def _resolve_items_with_price(parsed_items, sheets):
         if row is not None:
             resolved.append({
                 "item_code": row["Item_Code"],
-                "nama_item": row["Nama"],
+                "nama_item": _item_label(row),
                 "kategori": row.get("Kategori", ""),
                 "satuan": row.get("Satuan", it.get("satuan", "")),
                 "harga_satuan": row.get("Harga_Jual", 0),
@@ -728,7 +741,7 @@ async def _do_edit_order(update, context, target, text):
                 item_baru = {
                     "found_in_catalog": True,
                     "new_item_code": str(prod.get("Item_Code", "")).strip(),
-                    "new_nama": prod.get("Nama", item_baru_text) or item_baru_text,
+                    "new_nama": _item_label(prod) or item_baru_text,
                     "new_satuan": prod.get("Satuan", "") or cur_row.get("Satuan", ""),
                     "new_kategori": prod.get("Kategori", "") or cur_row.get("Kategori", ""),
                 }
@@ -1427,7 +1440,7 @@ async def _try_correct_pending_order(update, context, pending, text):
             prod = sheets.find_product(item_baru_text)
             if prod:
                 items[idx]["item_code"] = str(prod.get("Item_Code", "")).strip()
-                items[idx]["nama_item"] = prod.get("Nama", item_baru_text) or item_baru_text
+                items[idx]["nama_item"] = _item_label(prod) or item_baru_text
                 items[idx]["kategori"] = prod.get("Kategori", "") or items[idx].get("kategori", "")
                 items[idx]["satuan"] = prod.get("Satuan", "") or items[idx].get("satuan", "")
                 if iu.get("harga_satuan") is None:

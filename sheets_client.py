@@ -543,6 +543,59 @@ class SheetsClient:
             return True
         return False
 
+    def edit_order_item_product(
+        self, no_invoice, old_item_code, new_item_code=None, new_nama_item=None,
+        new_kategori=None, new_satuan=None, qty_baru=None, harga_baru=None,
+    ):
+        """Ganti PRODUK/UKURAN 1 baris item di dalam order tertentu -- dipakai
+        pas admin merevisi barang jadi varian/ukuran lain (misal 'PE Susu
+        Hippe 30x40' direvisi jadi 'PE Susu Hippe 35x45'), bukan cuma ganti
+        qty/harga. Item lama dicari lewat old_item_code + no_invoice. Field
+        new_* yang dikasih None/kosong dibiarin sama kayak sebelumnya.
+        Subtotal selalu dihitung ulang dari Qty & Harga_Satuan final.
+        Balikin True kalau baris ketemu & keupdate, False kalau enggak."""
+        ws = self._ws(config.SHEET_ORDERS)
+        headers = ws.row_values(1)
+        col_invoice = headers.index("No_Invoice") + 1
+        col_item_code = headers.index("Item_Code") + 1
+        col_nama = headers.index("Nama_Item") + 1
+        col_kategori = headers.index("Kategori") + 1
+        col_qty = headers.index("Qty") + 1
+        col_satuan = headers.index("Satuan") + 1
+        col_harga = headers.index("Harga_Satuan") + 1
+        col_subtotal = headers.index("Subtotal") + 1
+        target_code = (old_item_code or "").strip().upper()
+        if not target_code:
+            return False
+        all_values = ws.get_all_values()
+        for idx, row in enumerate(all_values[1:], start=2):
+            if len(row) < col_item_code:
+                continue
+            if row[col_invoice - 1] != no_invoice:
+                continue
+            if row[col_item_code - 1].strip().upper() != target_code:
+                continue
+            try:
+                qty_val = float(qty_baru) if qty_baru is not None else float(row[col_qty - 1] or 0)
+                harga_val = float(harga_baru) if harga_baru is not None else float(row[col_harga - 1] or 0)
+            except (TypeError, ValueError):
+                return False
+            if new_item_code and new_item_code.strip():
+                ws.update_cell(idx, col_item_code, new_item_code.strip().upper())
+            if new_nama_item and new_nama_item.strip():
+                ws.update_cell(idx, col_nama, new_nama_item.strip())
+            if new_kategori and new_kategori.strip():
+                ws.update_cell(idx, col_kategori, new_kategori.strip())
+            if new_satuan and new_satuan.strip():
+                ws.update_cell(idx, col_satuan, new_satuan.strip())
+            if qty_baru is not None:
+                ws.update_cell(idx, col_qty, qty_val)
+            if harga_baru is not None:
+                ws.update_cell(idx, col_harga, harga_val)
+            ws.update_cell(idx, col_subtotal, qty_val * harga_val)
+            return True
+        return False
+
     def cancel_order(self, no_invoice):
         """Tandai semua baris dengan No_Invoice ini Status='Batal' -- order
         DIHAPUS/DIBATALIN secara logis (datanya tetep ada buat histori,

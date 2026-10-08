@@ -711,13 +711,45 @@ async def _do_edit_order(update, context, target, text):
     rows_by_code = {str(r.get("Item_Code", "")).strip().upper(): r for r in rows}
     for it in corr.get("items", []) or []:
         code = (it.get("item_code") or "").strip()
+        item_baru_text = (it.get("item_baru") or "").strip()
         qty_baru = it.get("qty_baru") or None
         harga_baru = it.get("harga_satuan_baru") or None
-        if not code or (qty_baru is None and harga_baru is None):
+        if not code or (qty_baru is None and harga_baru is None and not item_baru_text):
             continue
         cur_row = rows_by_code.get(code.upper())
         if not cur_row:
             continue
+
+        item_baru = None
+        if item_baru_text:
+            prod = sheets.find_product(item_baru_text)
+            if prod:
+                new_harga_jual = prod.get("Harga_Jual") or None
+                item_baru = {
+                    "found_in_catalog": True,
+                    "new_item_code": str(prod.get("Item_Code", "")).strip(),
+                    "new_nama": prod.get("Nama", item_baru_text) or item_baru_text,
+                    "new_satuan": prod.get("Satuan", "") or cur_row.get("Satuan", ""),
+                    "new_kategori": prod.get("Kategori", "") or cur_row.get("Kategori", ""),
+                }
+                if harga_baru is None and new_harga_jual:
+                    try:
+                        harga_baru = float(new_harga_jual)
+                    except (TypeError, ValueError):
+                        pass
+            else:
+                # Belum ada di PriceList -- tetep dibolehin, kodenya dibiarin
+                # sama kayak sebelumnya (cuma nama/ukurannya yang diganti),
+                # biar gak nge-block revisi admin cuma gara-gara produknya
+                # belum sempet didaftarin ke katalog.
+                item_baru = {
+                    "found_in_catalog": False,
+                    "new_item_code": code,
+                    "new_nama": item_baru_text,
+                    "new_satuan": cur_row.get("Satuan", ""),
+                    "new_kategori": cur_row.get("Kategori", ""),
+                }
+
         item_updates.append({
             "item_code": code,
             "nama": cur_row.get("Nama_Item", code),
@@ -726,13 +758,15 @@ async def _do_edit_order(update, context, target, text):
             "qty_baru": qty_baru,
             "harga_lama": cur_row.get("Harga_Satuan", ""),
             "harga_baru": harga_baru,
+            "item_baru": item_baru,
         })
 
     if not updates and not item_updates:
         await update.effective_message.reply_text(
             "Gak nangkep bagian mana yang mau diganti (atau nilainya udah sama "
             "kayak yang kesimpen sekarang). Coba lebih jelas, misal: \"ganti "
-            "nama customer jadi Grandia Hotel\" atau \"qty tulip jadi 25 pack\"."
+            "nama customer jadi Grandia Hotel\" atau \"qty tulip jadi 25 pack\" "
+            "atau \"revisi Plastik PE Susu Hippe 30x40 jadi 35x45\"."
         )
         return
 
@@ -744,8 +778,16 @@ async def _do_edit_order(update, context, target, text):
         lama = first.get(_EDIT_FIELD_COLUMN[k], "") or "-"
         lines.append(f"• {_EDIT_FIELD_LABEL[k]}: {lama} → *{v}*")
     for iu in item_updates:
+        ib = iu.get("item_baru")
+        if ib:
+            lines.append(f"• Barang: {iu['nama']} → *{ib['new_nama']}*")
+            if not ib["found_in_catalog"]:
+                lines.append(
+                    "  ⚠️ _Produk ini belum ada di PriceList, kesimpen manual "
+                    "(kode & satuan tetep kaya yang lama)_"
+                )
         if iu["qty_baru"] is not None:
-            lines.append(f"• Qty {iu['nama']}: {iu['qty_lama']} {iu['satuan']} → *{iu['qty_baru']} {iu['satuan']}*")
+            lines.append(f"• Qty {iu['nama']}: {iu['qty_lama']} {iu['satuan']} → *{iu['qty_baru']} {ib['new_satuan'] if ib else iu['satuan']}*")
         if iu["harga_baru"] is not None:
             lines.append(
                 f"• Harga satuan {iu['nama']} (order ini aja): "
@@ -1093,10 +1135,21 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if pending.get("updates"):
             sheets.edit_order_header(no_invoice, pending["updates"])
         for iu in pending.get("item_updates", []):
-            sheets.edit_order_item_qty(
-                no_invoice, iu["item_code"],
-                qty_baru=iu.get("qty_baru"), harga_baru=iu.get("harga_baru"),
-            )
+            ib = iu.get("item_baru")
+            if ib:
+                sheets.edit_order_item_product(
+                    no_invoice, iu["item_code"],
+                    new_item_code=ib.get("new_item_code"),
+                    new_nama_item=ib.get("new_nama"),
+                    new_kategori=ib.get("new_kategori"),
+                    new_satuan=ib.get("new_satuan"),
+                    qty_baru=iu.get("qty_baru"), harga_baru=iu.get("harga_baru"),
+                )
+            else:
+                sheets.edit_order_item_qty(
+                    no_invoice, iu["item_code"],
+                    qty_baru=iu.get("qty_baru"), harga_baru=iu.get("harga_baru"),
+                )
         context.user_data["last_invoice"] = no_invoice
         await query.edit_message_text(
             f"✅ {no_invoice} udah diupdate. Lagi bikin ulang invoice & surat jalan...",

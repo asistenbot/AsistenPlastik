@@ -438,7 +438,8 @@ ini, tanpa teks lain:
   "tanggal_kirim": "nilai baru kalau tanggal kirim mau diganti/ditambahin, string kosong kalau TIDAK diganti",
   "items": [
     {{
-      "item_code": "kode item (dari daftar ITEM DI ORDER INI di atas) yang mau diganti",
+      "item_code": "kode item LAMA (dari daftar ITEM DI ORDER INI di atas) yang mau diganti/direvisi",
+      "item_baru": "nama/ukuran/varian BARU kalau admin mau GANTI PRODUK atau UKURAN/DIMENSI barang ini jadi barang lain (tulis lengkap, misal 'PE Susu Hippe 35 x 45'), string kosong kalau admin CUMA mau ganti qty/harga barang yang SAMA (bukan ganti produknya)",
       "qty_baru": angka qty baru, 0 kalau qty item ini TIDAK diganti,
       "harga_satuan_baru": angka harga satuan BARU khusus buat order ini aja, 0 kalau TIDAK diganti
     }}
@@ -455,9 +456,20 @@ Aturan penting:
   (case-insensitive) dengan nama customer yang udah kesimpen sekarang,
   berarti gak ada yang perlu diubah -- biarin nama_customer string kosong,
   JANGAN balikin nilai yang sama sebagai "perubahan".
-- "items" cuma diisi kalau admin EKSPLISIT minta ganti QTY dan/atau HARGA
-  SATUAN salah satu barang yang UDAH ada di order ini (misal "qty jadi
-  25kg", "yang tulip jadi 10 pack aja", "harganya jadi 18000",
+- Kalau instruksinya berbentuk "revisi/ganti/ubah/betulin [barang/ukuran
+  LAMA] jadi [barang/ukuran BARU]" (misal "revisi Plastik PE Susu Hippe
+  30 x 40 jadi 35 x 45", "PE Susu Hippe 30x40 ganti ukuran jadi 35x45"),
+  itu artinya admin mau GANTI PRODUK/UKURAN barang itu ke produk/ukuran
+  lain -- BUKAN cuma ganti qty/harga. Cari dari daftar ITEM DI ORDER INI
+  barang yang nama/ukurannya paling cocok sama yang disebut admin, isi
+  item_code dengan kode barang LAMA itu, dan isi item_baru dengan nama/
+  ukuran BARU yang disebut admin (tulis lengkap). JANGAN isi qty_baru
+  atau harga_satuan_baru di kasus ini kecuali admin JUGA eksplisit nyebut
+  qty/harga baru secara terpisah.
+- "items" dengan item_baru KOSONG (cuma qty_baru/harga_satuan_baru) cuma
+  diisi kalau admin EKSPLISIT minta ganti QTY dan/atau HARGA SATUAN salah
+  satu barang yang UDAH ada di order ini TANPA ganti produknya (misal
+  "qty jadi 25kg", "yang tulip jadi 10 pack aja", "harganya jadi 18000",
   "plastik sampah harganya di update jadi 16000"). Kalau order cuma punya
   1 macam barang dan admin nyebut qty/harga baru tanpa nama barang, itu
   barang itu yang dimaksud. JANGAN nambah barang baru atau hapus barang

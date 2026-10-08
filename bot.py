@@ -1413,6 +1413,7 @@ async def _try_correct_pending_order(update, context, pending, text):
         changed.append("Ongkir")
 
     items = pending.get("items", [])
+    sheets = _sheets()
     for iu in corr.get("item_updates") or []:
         try:
             idx = int(iu.get("index"))
@@ -1420,6 +1421,28 @@ async def _try_correct_pending_order(update, context, pending, text):
             continue
         if not (0 <= idx < len(items)):
             continue
+        item_baru_text = (iu.get("item_baru") or "").strip()
+        if item_baru_text:
+            nama_lama = items[idx].get("nama_item", "")
+            prod = sheets.find_product(item_baru_text)
+            if prod:
+                items[idx]["item_code"] = str(prod.get("Item_Code", "")).strip()
+                items[idx]["nama_item"] = prod.get("Nama", item_baru_text) or item_baru_text
+                items[idx]["kategori"] = prod.get("Kategori", "") or items[idx].get("kategori", "")
+                items[idx]["satuan"] = prod.get("Satuan", "") or items[idx].get("satuan", "")
+                if iu.get("harga_satuan") is None:
+                    harga_jual_baru = prod.get("Harga_Jual") or None
+                    if harga_jual_baru:
+                        try:
+                            items[idx]["harga_satuan"] = float(harga_jual_baru)
+                        except (TypeError, ValueError):
+                            pass
+            else:
+                # Belum ada di PriceList -- tetep dibolehin ganti nama/ukurannya
+                # aja, kode & satuan dibiarin kaya sebelumnya biar gak nge-block.
+                items[idx]["item_code"] = ""
+                items[idx]["nama_item"] = item_baru_text
+            changed.append(f"Barang {nama_lama} → {items[idx]['nama_item']}")
         if iu.get("qty") is not None:
             try:
                 items[idx]["qty"] = float(iu["qty"])

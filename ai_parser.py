@@ -519,7 +519,7 @@ Baca pesan admin, balikin HANYA JSON persis struktur ini, tanpa teks lain:
     "ongkir": angka ongkir baru kalau mau diganti, -1 kalau TIDAK diganti
   }},
   "item_updates": [
-    {{"index": angka index item di ITEM DI ORDER INI di atas (0-based, urut dari atas), "qty": angka qty baru atau null kalau TIDAK diganti, "harga_satuan": angka harga satuan baru atau null kalau TIDAK diganti}}
+    {{"index": angka index item di ITEM DI ORDER INI di atas (0-based, urut dari atas), "item_baru": "nama/ukuran/varian BARU kalau admin mau GANTI PRODUK atau UKURAN/DIMENSI barang ini (tulis lengkap, misal 'PE Susu Hippe 35 x 45'), string kosong kalau admin CUMA mau ganti qty/harga barang yang SAMA", "qty": angka qty baru atau null kalau TIDAK diganti, "harga_satuan": angka harga satuan baru atau null kalau TIDAK diganti}}
   ],
   "matched": true kalau ADA SESUATU yang match jadi koreksi (header atau item), false kalau pesan ini SAMA SEKALI gak nyambung ke koreksi preview order ini
 }}
@@ -527,9 +527,19 @@ Baca pesan admin, balikin HANYA JSON persis struktur ini, tanpa teks lain:
 Aturan penting:
 - JANGAN mengarang perubahan buat field yang gak disebut -- biarin default
   (string kosong / -1 / null).
-- item_updates cuma diisi kalau admin EKSPLISIT nyebut mau ganti qty
-  dan/atau harga SALAH SATU item yang UDAH ada di preview ini. Kalau cuma
-  ada 1 item di preview dan admin nyebut qty/harga baru tanpa nama barang,
+- Kalau instruksinya berbentuk "revisi/ganti/ubah/betulin [barang/ukuran
+  LAMA] jadi [barang/ukuran BARU]" (misal "ukurannya salah, revisi jadi
+  35x45", "ganti PE Susu Hippe 30x40 jadi 35x45"), itu artinya admin mau
+  GANTI PRODUK/UKURAN barang itu -- BUKAN cuma ganti qty/harga. Cari dari
+  ITEM DI ORDER INI barang yang paling cocok sama yang dimaksud admin
+  (kalau cuma ada 1 item di preview, itu yang dimaksud -- index 0), isi
+  index-nya, dan isi item_baru dengan nama/ukuran BARU yang disebut admin
+  (tulis lengkap). JANGAN isi qty/harga_satuan di kasus ini kecuali admin
+  JUGA eksplisit nyebut qty/harga baru secara terpisah.
+- item_updates dengan item_baru KOSONG (cuma qty/harga_satuan) cuma diisi
+  kalau admin EKSPLISIT nyebut mau ganti qty dan/atau harga SALAH SATU
+  item yang UDAH ada di preview ini TANPA ganti produknya. Kalau cuma ada
+  1 item di preview dan admin nyebut qty/harga baru tanpa nama barang,
   itu item itu yang dimaksud (index 0).
 - Kalau pesan ini sebenernya mau NAMBAH barang baru (bukan koreksi item
   yang udah ada), atau sama sekali gak nyambung ke koreksi apapun (basa-

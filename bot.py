@@ -913,7 +913,10 @@ async def _present_price_update(update, context, parsed):
         if row is not None:
             harga_jual_baru = it.get("harga_jual") or 0
             harga_beli_baru = it.get("harga_beli") or 0
-            if harga_jual_baru or harga_beli_baru:
+            nama_baru = (it.get("nama_baru") or "").strip()
+            if nama_baru and nama_baru.strip().lower() == str(row.get("Nama", "")).strip().lower():
+                nama_baru = ""  # sama persis kayak sekarang, bukan perubahan beneran
+            if harga_jual_baru or harga_beli_baru or nama_baru:
                 resolved.append({
                     "item_code": row["Item_Code"],
                     "nama": row["Nama"],
@@ -921,6 +924,7 @@ async def _present_price_update(update, context, parsed):
                     "harga_beli_lama": row.get("Harga_Beli", 0),
                     "harga_jual_baru": harga_jual_baru or None,
                     "harga_beli_baru": harga_beli_baru or None,
+                    "nama_baru": nama_baru or None,
                 })
             continue
         # Item ini gak ketemu di katalog -- kalau AI ngasih usulan kode/
@@ -966,8 +970,10 @@ async def _present_price_update(update, context, parsed):
         lines.append(f"*Dari daftar harga {nama_supplier}:*")
         lines.append("")
     if resolved:
-        lines.append("*Mau diubah harganya:*")
+        lines.append("*Mau diubah di PriceList:*")
         for r in resolved:
+            if r.get("nama_baru"):
+                lines.append(f"• ({r['item_code']}) Nama/ukuran: {r['nama']} → *{r['nama_baru']}*")
             if r["harga_jual_baru"]:
                 lines.append(f"• {r['nama']} ({r['item_code']}) — harga jual: {rupiah(r['harga_jual_lama'])} → *{rupiah(r['harga_jual_baru'])}*")
             if r["harga_beli_baru"]:
@@ -1212,7 +1218,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sheets = _sheets()
         items = pending.get("items", [])
         for r in items:
-            sheets.update_price(r["item_code"], harga_jual=r["harga_jual_baru"], harga_beli=r["harga_beli_baru"])
+            if r.get("nama_baru"):
+                sheets.rename_product(r["item_code"], new_nama=r["nama_baru"])
+            if r.get("harga_jual_baru") or r.get("harga_beli_baru"):
+                sheets.update_price(r["item_code"], harga_jual=r["harga_jual_baru"], harga_beli=r["harga_beli_baru"])
 
         new_items = pending.get("new_items", [])
         added, skipped = [], []

@@ -578,6 +578,7 @@ teks lain:
     {{
       "item_code": "KODE_DARI_KATALOG kalau ketemu jelas, string kosong kalau item gak ketemu/ambigu",
       "nama_disebut": "nama barang persis seperti disebut admin",
+      "nama_baru": "nama/ukuran BARU buat produk ini KALAU admin mau REVISI/GANTI nama atau ukuran produk yang item_code-nya SUDAH ada di katalog (misal 'revisi PP bening 40x60 jadi 45x65' -> nama_baru = 'PP bening 45 x 65'), tulis lengkap. String kosong kalau admin CUMA mau ganti harga, bukan ganti nama/ukuran produknya.",
       "harga_jual": angka harga jual BARU, 0 kalau harga jual TIDAK disebut/diubah,
       "harga_beli": angka harga beli BARU, 0 kalau harga beli TIDAK disebut/diubah,
       "item_code_baru": "USULAN kode singkat buat produk ini KALAU item_code di atas kosong (barang belum ada di katalog) -- huruf besar, alfanumerik tanpa spasi, max 10 karakter, JANGAN sama dengan kode yang udah ada di katalog. Kosongkan kalau item_code di atas SUDAH terisi.",
@@ -600,6 +601,15 @@ Aturan:
   BARU), supaya admin bisa milih nambahin ke katalog kalau mau -- JANGAN
   kosongkan ketiganya kecuali bener-bener gak ada cukup info (misal harga
   doang tanpa nama jelas sama sekali).
+- Kalau instruksinya berbentuk "revisi/ganti/ubah/betulin [nama/ukuran
+  LAMA] jadi [nama/ukuran BARU]" buat produk yang SUDAH ada di katalog
+  (item_code ketemu), itu artinya admin mau REVISI PERMANEN nama/ukuran
+  produk itu di PriceList -- isi item_code dengan kode produk LAMA itu,
+  dan isi nama_baru dengan nama/ukuran barunya. Boleh digabung sama ganti
+  harga sekaligus dalam 1 pesan (misal "revisi PP bening 40x60 jadi
+  45x65, harganya jadi 25000" -> isi nama_baru DAN harga_jual). JANGAN
+  isi harga_jual/harga_beli di kasus revisi nama kalau admin gak eksplisit
+  nyebut angka harga barunya juga.
 """
 
 

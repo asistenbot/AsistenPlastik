@@ -297,6 +297,37 @@ class SheetsClient:
             return True
         return False
 
+    def rename_product(self, item_code, new_nama=None, new_kategori=None, new_satuan=None):
+        """Ganti Nama/Kategori/Satuan produk yang SUDAH ADA di PriceList
+        (dicari by Item_Code, persis) -- dipakai pas admin REVISI nama/ukuran
+        produk secara PERMANEN di katalog (misal 'PP bening 40x60' direvisi
+        jadi 'PP bening 45x65'), beda sama update_price yang cuma ngurusin
+        harga. Field yang dikasih None/kosong dibiarin sama kayak sebelumnya.
+        Balikin True kalau item_code ketemu & keupdate, False kalau enggak."""
+        ws = self._ws(config.SHEET_PRICELIST)
+        headers = ws.row_values(1)
+        col_code = headers.index("Item_Code") + 1
+        col_nama = headers.index("Nama") + 1
+        col_kategori = headers.index("Kategori") + 1
+        col_satuan = headers.index("Satuan") + 1
+        target = (item_code or "").strip().upper()
+        if not target:
+            return False
+        all_values = ws.get_all_values()
+        for idx, row in enumerate(all_values[1:], start=2):
+            if len(row) < col_code:
+                continue
+            if row[col_code - 1].strip().upper() != target:
+                continue
+            if new_nama and new_nama.strip():
+                ws.update_cell(idx, col_nama, new_nama.strip())
+            if new_kategori and new_kategori.strip():
+                ws.update_cell(idx, col_kategori, new_kategori.strip())
+            if new_satuan and new_satuan.strip():
+                ws.update_cell(idx, col_satuan, new_satuan.strip())
+            return True
+        return False
+
     def add_product(self, item_code, nama, deskripsi="", kategori="", satuan="", harga_jual=0, harga_beli=0):
         """Tambah 1 baris produk BARU ke PriceList. item_code WAJIB unik --
         kalau kode itu udah kepake, gak nambah apa-apa (balikin False) biar

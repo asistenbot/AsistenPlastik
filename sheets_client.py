@@ -439,8 +439,8 @@ class SheetsClient:
 
     # ---------------- NOMOR DOKUMEN ----------------
 
-    def _next_number(self, prefix, existing_numbers):
-        today = _today_str().replace("-", "")
+    def _next_number(self, prefix, existing_numbers, tanggal=None):
+        today = (tanggal or _today_str()).replace("-", "")
         today_prefix = f"{prefix}-{today}-"
         seq = 1
         used = [n for n in existing_numbers if n.startswith(today_prefix)]
@@ -455,9 +455,9 @@ class SheetsClient:
                 seq = max(nums) + 1
         return f"{today_prefix}{seq:03d}"
 
-    def next_invoice_number(self):
+    def next_invoice_number(self, tanggal=None):
         existing = [str(r.get("No_Invoice", "")) for r in self.get_all_orders()]
-        return self._next_number(config.INVOICE_PREFIX, existing)
+        return self._next_number(config.INVOICE_PREFIX, existing, tanggal)
 
     def next_po_number(self):
         existing = [str(r.get("No_PO", "")) for r in self.get_all_pos()]
@@ -469,15 +469,24 @@ class SheetsClient:
         return self._records(self._ws(config.SHEET_ORDERS))
 
     def add_order(self, nama_customer, no_hp, alamat, metode, items, ongkir=0,
-                  no_po_customer="", tanggal_kirim=""):
+                  no_po_customer="", tanggal_kirim="", tanggal_order=""):
         """items: list of dict {item_code, nama_item, kategori, qty, satuan,
         harga_satuan}. Nulis 1 baris per item, semuanya share No_Invoice yang
         sama. no_po_customer/tanggal_kirim opsional (referensi No. PO dari
         customer & tanggal request kirim, kalau ada). Balikin no_invoice
-        yang dipakai."""
+        yang dipakai. tanggal_order (YYYY-MM-DD, opsional) = tanggal invoice
+        kalau order ini pindahan dari nota/program lama; kosong = hari ini."""
+        tgl = None
+        try:
+            if tanggal_order:
+                tgl = datetime.datetime.strptime(str(tanggal_order).strip(), "%Y-%m-%d").strftime("%Y-%m-%d")
+        except ValueError:
+            tgl = None
         with self._lock:
-            no_invoice = self.next_invoice_number()
+            no_invoice = self.next_invoice_number(tgl)
             ts = _now_str()
+            if tgl:
+                ts = f"{tgl} {ts.split(' ', 1)[1]}"
             ws = self._ws(config.SHEET_ORDERS)
             rows = []
             for idx, it in enumerate(items):

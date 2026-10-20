@@ -63,6 +63,20 @@ def _qty(q):
     return s.replace(",", "_").replace(".", ",").replace("_", ".")
 
 
+_BULAN = ["", "Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus",
+          "September", "Oktober", "November", "Desember"]
+
+
+def _tgl_label(tanggal=None):
+    """'2026-09-28 10:00:00' -> '28 September 2026'; kosong/rusak = hari ini (WIB)."""
+    import datetime
+    try:
+        dt = datetime.datetime.strptime(str(tanggal)[:10], "%Y-%m-%d")
+    except ValueError:
+        dt = datetime.datetime.utcnow() + datetime.timedelta(hours=7)
+    return f"{dt.day} {_BULAN[dt.month]} {dt.year}"
+
+
 def _wrap(s, n):
     return textwrap.wrap(str(s or ""), n) or [""]
 
@@ -269,7 +283,7 @@ def _finish(pages):
 
 # ------------------------------------------------------------ public API
 def generate_invoice_dotmatrix(no_invoice, nama_customer, no_hp, alamat, metode, items,
-                               ongkir=0, no_po_customer="", tanggal_kirim=""):
+                               ongkir=0, no_po_customer="", tanggal_kirim="", tanggal=None):
     widths = [3, 31, 8, 6, 11, 14]
     aligns = ["c", "l", "r", "l", "r", "r"]
     head = ["NO", "NAMA BARANG", "QTY", "SAT", "HARGA(Rp)", "SUBTOTAL(Rp)"]
@@ -296,15 +310,14 @@ def generate_invoice_dotmatrix(no_invoice, nama_customer, no_hp, alamat, metode,
                 _framed(" Terima kasih atas kepercayaan Anda."),
                 _hl("└", "─", "┘", [INNER])]
 
-    from documents import _now_tanggal
     party = _party_lines(nama_customer, no_hp, alamat, metode, no_po_customer, tanggal_kirim)
-    pages = _build("INVOICE", no_invoice, "Tgl : " + _now_tanggal().split(", ", 1)[-1],
+    pages = _build("INVOICE", no_invoice, "Tgl : " + _tgl_label(tanggal),
                    party, widths, aligns, head, groups, footer, 8)
     return _finish(pages)
 
 
 def generate_surat_jalan_dotmatrix(no_surat_jalan, nama_customer, no_hp, alamat, metode, items,
-                                   no_invoice_ref=None, no_po_customer="", tanggal_kirim=""):
+                                   no_invoice_ref=None, no_po_customer="", tanggal_kirim="", tanggal=None):
     widths = [3, 50, 9, 7, 5]
     aligns = ["c", "l", "r", "l", "c"]
     head = ["NO", "NAMA BARANG", "QTY", "SAT", "CEK"]
@@ -320,8 +333,7 @@ def generate_surat_jalan_dotmatrix(no_surat_jalan, nama_customer, no_hp, alamat,
                 _framed(" " + "(____________________)" + " " * 32 + "(____________________)" + " "),
                 _hl("└", "─", "┘", [INNER])]
 
-    from documents import _now_tanggal
-    tgl = _now_tanggal().split(", ", 1)[-1]
+    tgl = _tgl_label(tanggal)
     ref = (f"Ref : {no_invoice_ref}   " if no_invoice_ref else "") + f"Tgl : {tgl}"
     party = _party_lines(nama_customer, no_hp, alamat, metode, no_po_customer, tanggal_kirim)
     pages = _build("SURAT JALAN", no_surat_jalan, ref, party, widths, aligns, head,

@@ -122,6 +122,7 @@ Balikin HANYA JSON dengan struktur persis seperti ini, tanpa teks lain:
   ],
   "ongkir": 0,
   "no_po_customer": "nomor PO/Purchase Order MILIK CUSTOMER kalau ada (misal kalau fotonya adalah dokumen resmi 'Purchase Order' dari customer dengan field 'Purchase Number'/'PO Number'/'No. PO', ambil nomornya persis), kalau gak ada string kosong",
+  "tanggal_order": "tanggal ORDER/INVOICE/NOTA yang TERTULIS di foto atau chat (misal kolom 'Tanggal'/'Tgl Invoice' di invoice lama), format YYYY-MM-DD. Kosongin (string kosong) kalau gak ada. JANGAN diisi tanggal kirim, jatuh tempo, atau tebakan",
   "tanggal_kirim": "tanggal customer MINTA dikirim/diambil kalau disebut eksplisit (dari teks admin, atau dari field 'Required Date'/'Due Date'/'Delivery Date' di dokumen PO customer kalau ada), format bebas tapi jelas (misal '20 September 2026'), kalau gak disebut string kosong",
   "catatan": "catatan buat admin kalau ada yang ambigu/gak yakin, kalau tidak ada string kosong",
   "perlu_konfirmasi_manual": false
@@ -524,6 +525,7 @@ Baca pesan admin, balikin HANYA JSON persis struktur ini, tanpa teks lain:
     "metode": "'Kirim' atau 'Ambil' kalau metode mau diganti, string kosong kalau TIDAK diganti",
     "no_po_customer": "nilai baru kalau No. PO Customer mau diganti/ditambahin, string kosong kalau TIDAK diganti",
     "tanggal_kirim": "nilai baru kalau tanggal kirim mau diganti/ditentuin, string kosong kalau TIDAK diganti",
+    "tanggal_order": "tanggal ORDER/INVOICE-nya (bukan tanggal kirim) format YYYY-MM-DD kalau admin minta tanggal order/invoice diganti atau disamain, string kosong kalau TIDAK diganti",
     "ongkir": angka ongkir baru kalau mau diganti, -1 kalau TIDAK diganti
   }},
   "item_updates": [

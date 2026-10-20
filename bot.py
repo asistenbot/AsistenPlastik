@@ -90,6 +90,15 @@ async def _send_text(update, text, reply_markup=None):
 
 # ---------------- PREVIEW TEXT ----------------
 
+def _valid_tanggal_order(v):
+    """'2026-09-28' -> '2026-09-28' kalau format YYYY-MM-DD valid, selain itu ''."""
+    import datetime
+    try:
+        return datetime.datetime.strptime(str(v or "").strip(), "%Y-%m-%d").strftime("%Y-%m-%d")
+    except ValueError:
+        return ""
+
+
 def _order_preview_text(parsed):
     lines = ["*Hasil baca order:*", ""]
     lines.append(f"Customer: *{parsed.get('nama_customer', '-')}*")
@@ -98,6 +107,8 @@ def _order_preview_text(parsed):
     if parsed.get("alamat"):
         lines.append(f"Alamat: {parsed['alamat']}")
     lines.append(f"Metode: {parsed.get('metode', 'Kirim')}")
+    if _valid_tanggal_order(parsed.get("tanggal_order")):
+        lines.append(f"Tanggal Order: {dotmatrix._tgl_label(_valid_tanggal_order(parsed.get('tanggal_order')))}")
     if parsed.get("no_po_customer"):
         lines.append(f"No. PO Customer: {parsed['no_po_customer']}")
     if parsed.get("tanggal_kirim"):
@@ -507,6 +518,7 @@ async def _kirim_invoice(update, context, no_invoice):
         first.get("Metode", "Kirim"), items, ongkir,
         no_po_customer=first.get("No_PO_Customer", ""),
         tanggal_kirim=first.get("Tanggal_Kirim", ""),
+        tanggal=first.get("Timestamp", ""),
     )
     await _kirim_dotmatrix(update, f"Invoice {no_invoice}", f"{no_invoice}.txt", pages, txt)
 
@@ -525,6 +537,7 @@ async def _kirim_surat_jalan(update, context, no_invoice):
         first.get("Metode", "Kirim"), items, no_invoice_ref=no_invoice,
         no_po_customer=first.get("No_PO_Customer", ""),
         tanggal_kirim=first.get("Tanggal_Kirim", ""),
+        tanggal=first.get("Timestamp", ""),
     )
     await _kirim_dotmatrix(update, f"Surat Jalan {no_sj}", f"{no_sj}.txt", pages, txt)
 
@@ -747,6 +760,7 @@ _EDIT_FIELD_LABEL = {
     "nama_customer": "Nama Customer", "no_hp": "No HP",
     "alamat": "Alamat", "metode": "Metode",
     "no_po_customer": "No. PO Customer", "tanggal_kirim": "Tanggal Kirim",
+    "tanggal_order": "Tanggal Order",
 }
 _EDIT_FIELD_COLUMN = {
     "nama_customer": "Nama_Customer", "no_hp": "No_HP",
@@ -1251,6 +1265,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parsed.get("metode", "Kirim"), parsed["items"], ongkir=parsed.get("ongkir", 0) or 0,
             no_po_customer=parsed.get("no_po_customer", "") or "",
             tanggal_kirim=parsed.get("tanggal_kirim", "") or "",
+            tanggal_order=_valid_tanggal_order(parsed.get("tanggal_order")),
         )
         context.user_data["last_invoice"] = no_invoice
         await query.edit_message_text(f"✅ Order disimpan sebagai *{no_invoice}*. Lagi bikin invoice & surat jalan...", parse_mode=ParseMode.MARKDOWN)
@@ -1530,6 +1545,7 @@ def _pending_order_desc(parsed):
         f"Metode: {parsed.get('metode', '')}\n"
         f"No. PO Customer: {parsed.get('no_po_customer', '')}\n"
         f"Tanggal Kirim: {parsed.get('tanggal_kirim', '')}\n"
+        f"Tanggal Order: {parsed.get('tanggal_order', '') or '(hari ini)'}\n"
         f"Ongkir: {parsed.get('ongkir', 0)}\n"
         f"ITEM DI ORDER INI:\n{items_desc}"
     )
@@ -1552,8 +1568,10 @@ async def _try_correct_pending_order(update, context, pending, text):
 
     changed = []
     header_updates = corr.get("header_updates") or {}
-    for field in ("nama_customer", "no_hp", "alamat", "metode", "no_po_customer", "tanggal_kirim"):
+    for field in ("nama_customer", "no_hp", "alamat", "metode", "no_po_customer", "tanggal_kirim", "tanggal_order"):
         val = (header_updates.get(field) or "").strip()
+        if field == "tanggal_order":
+            val = _valid_tanggal_order(val)
         if val:
             pending[field] = val
             changed.append(_EDIT_FIELD_LABEL.get(field, field))

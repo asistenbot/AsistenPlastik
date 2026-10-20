@@ -75,7 +75,7 @@ def _fill_customer_defaults(parsed, sheets):
             parsed[field] = str(cust[col]).strip()
 
 
-_PENDING_KEYS = ("pending_order", "pending_po", "pending_edit", "pending_price_update", "pending_cancel", "pending_cancel_po")
+_PENDING_KEYS = ("pending_order", "pending_po", "pending_edit", "pending_price_update", "pending_cancel", "pending_cancel_po", "pending_hk")
 
 
 def _has_pending(context):
@@ -315,6 +315,7 @@ Command di bawah ini cadangan aja kalau mau lebih pasti/cepat:
 /dokumen <no invoice atau nama customer> — cetak ulang invoice + surat jalan
 (kalau customer punya banyak invoice, bot kasih daftar buat dipilih)
 /lunas <no invoice atau nama customer> — tandai order sudah dibayar
+/harga <kategori/nama> <harga> [beli] — ubah harga banyak produk sekaligus (ada preview)
 /pengingat — lihat jadwal pengingat (kontra bon, tagihan, bayar supplier)
 /piutang — rekap tagihan customer yang belum lunas
 
@@ -1517,6 +1518,20 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await _ask_lunas(update, val)
         return
 
+    if data == "hk_no":
+        context.user_data.pop("pending_hk", None)
+        await query.edit_message_text("Oke, harga gak jadi diubah.")
+        return
+    if data == "hk_ok":
+        pend = context.user_data.pop("pending_hk", None)
+        if not pend:
+            await query.edit_message_text("Perubahannya udah gak ada / kadaluarsa, ketik /harga lagi.")
+            return
+        n = _sheets().bulk_update_price(pend["codes"], pend["field"], pend["harga"])
+        kolom = "Harga Jual" if pend["field"] == "jual" else "Harga Beli"
+        await query.edit_message_text(f"✅ {kolom} {n} produk diubah jadi {rupiah(pend['harga'])}.")
+        return
+
     if data == "lunasno":
         await query.edit_message_text("Oke, gak jadi ditandai lunas.")
         return
@@ -2235,6 +2250,46 @@ async def _notify_web_order(app, pid, parsed):
     await _mirror(app.bot, "order", text=text, reply_markup=kb)
 
 
+def _parse_angka_harga(tok):
+    import re
+    t = tok.lower().replace("rp", "").replace(".", "").replace(",", "")
+    m = re.fullmatch(r"(\d+)(k|rb|ribu)?", t)
+    if not m:
+        return None
+    v = int(m.group(1))
+    return v * 1000 if m.group(2) else v
+
+
+@owner_only
+async def hargakategori_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = list(context.args or [])
+    usage = ("Format: /harga <kategori atau nama> <harga> [beli]\n"
+             "Contoh:\n/harga SAMPAH 25000\n/harga tulip putih 28k\n/harga PP 30000 beli")
+    field = "jual"
+    if args and args[-1].lower() in ("beli", "jual"):
+        field = args.pop().lower()
+    if len(args) < 2 or _parse_angka_harga(args[-1]) is None:
+        await update.effective_message.reply_text(usage)
+        return
+    harga = _parse_angka_harga(args[-1])
+    query = " ".join(args[:-1])
+    cara, rows = _sheets().cari_produk_massal(query)
+    if not rows:
+        await update.effective_message.reply_text(f"Gak nemu kategori/produk '{query}' di PriceList.")
+        return
+    context.user_data["pending_hk"] = {"codes": [str(r["Item_Code"]) for r in rows], "harga": harga, "field": field}
+    kolom = "Harga Jual" if field == "jual" else "Harga Beli"
+    lines = [f"Ubah {kolom} jadi {rupiah(harga)} untuk {len(rows)} produk (cocok lewat {cara} '{query}'):", ""]
+    for r in rows[:25]:
+        lama = r.get("Harga_Jual" if field == "jual" else "Harga_Beli", 0)
+        lines.append(f"• {r.get('Item_Code')} {r.get('Nama')} ({rupiah(lama or 0)} → {rupiah(harga)})")
+    if len(rows) > 25:
+        lines.append(f"... dan {len(rows) - 25} lainnya")
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"✅ Ya, ubah {len(rows)} produk", callback_data="hk_ok"),
+                                InlineKeyboardButton("❌ Batal", callback_data="hk_no")]])
+    await update.effective_message.reply_text("\n".join(lines), reply_markup=kb)
+
+
 @owner_only
 async def importgrandia_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from data_grandia import PRODUK_GRANDIA
@@ -2299,6 +2354,8 @@ def main():
     app.add_handler(CommandHandler("pricelist", pricelist_cmd))
     app.add_handler(CommandHandler("topik", topik_cmd))
     app.add_handler(CommandHandler("linkorder", linkorder_cmd))
+    app.add_handler(CommandHandler("harga", hargakategori_cmd))
+    app.add_handler(CommandHandler("hargakategori", hargakategori_cmd))
     app.add_handler(CommandHandler("importgrandia", importgrandia_cmd))
     app.add_error_handler(error_handler)
     app.add_handler(CommandHandler("lunas", lunas_cmd))

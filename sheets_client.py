@@ -427,6 +427,43 @@ class SheetsClient:
             return True
         return False
 
+    def cari_produk_massal(self, query):
+        """Cari banyak produk sekaligus: Kategori (persis) > Nama/Deskripsi
+        (semua kata cocok) > Khusus_Customer. Balikin (cara, [rows])."""
+        q = (query or "").strip().lower()
+        rows = [r for r in self.get_price_list() if str(r.get("Item_Code", "")).strip()]
+        if not q:
+            return "", []
+        hit = [r for r in rows if str(r.get("Kategori", "")).strip().lower() == q]
+        if hit:
+            return "kategori", hit
+        words = q.split()
+        hit = [r for r in rows if all(w in (str(r.get("Nama", "")) + " " + str(r.get("Deskripsi", ""))
+                                              + " " + str(r.get("Item_Code", ""))).lower() for w in words)]
+        if hit:
+            return "nama", hit
+        hit = [r for r in rows if q in str(r.get("Khusus_Customer", "")).lower()]
+        if hit:
+            return "khusus customer", hit
+        return "", []
+
+    def bulk_update_price(self, codes, field, harga):
+        """Ubah Harga_Jual / Harga_Beli buat banyak item sekaligus (1x tulis)."""
+        from gspread.utils import rowcol_to_a1
+        ws = self._ws(config.SHEET_PRICELIST)
+        values = ws.get_all_values()
+        headers = values[0]
+        c_code = headers.index("Item_Code")
+        c_f = headers.index("Harga_Jual" if field == "jual" else "Harga_Beli")
+        want = {c.strip().upper() for c in codes}
+        data = []
+        for i, row in enumerate(values[1:], start=2):
+            if len(row) > c_code and row[c_code].strip().upper() in want:
+                data.append({"range": rowcol_to_a1(i, c_f + 1), "values": [[harga]]})
+        if data:
+            ws.batch_update(data)
+        return len(data)
+
     def rename_product(self, item_code, new_nama=None, new_kategori=None, new_satuan=None):
         """Ganti Nama/Kategori/Satuan produk yang SUDAH ADA di PriceList
         (dicari by Item_Code, persis) -- dipakai pas admin REVISI nama/ukuran

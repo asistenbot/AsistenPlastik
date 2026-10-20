@@ -479,8 +479,11 @@ async def _do_kontrabon(update, key, raw_text=""):
         rid = sheets.add_reminder("kontra_bon", inv, rows[0].get("Nama_Customer", ""), total,
                                   _wib_now().date(), "Manual dari chat")
         rems = [sheets.get_reminder(rid)]
+    by_nama = {}
     for rem in rems:
-        text, kb = _reminder_message(rem)
+        by_nama.setdefault(rem.get("Nama", ""), []).append(rem)
+    for group in by_nama.values():
+        text, kb = _kb_list_message(group) if len(group) > 1 else _reminder_message(group[0])
         await update.effective_message.reply_text(text, reply_markup=kb)
 
 
@@ -573,19 +576,10 @@ async def dokumen_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _kirim_dotmatrix(update, judul, nama_dok, pages, txt, pdf):
-    """Kirim preview tiap halaman (gambar) + PDF kertas 8,5 x 5,5 inch + file
-    teks polos 80 kolom (dua-duanya buat di-print di dot matrix)."""
-    n = len(pages)
-    for i, png in enumerate(pages, 1):
-        cap = judul + (f" (hal {i}/{n})" if n > 1 else "")
-        await update.effective_message.reply_photo(photo=png, caption=cap)
+    """Cukup kirim 1 file PDF kertas 8,5 x 5,5 inch (siap print)."""
     await update.effective_message.reply_document(
         document=pdf, filename=f"{nama_dok}.pdf",
-        caption="PDF ukuran kertas 8,5 x 5,5 inch — buat print lewat driver/aplikasi printer (pilih ukuran kertas custom 8,5x5,5 atau 'fit to page')",
-    )
-    await update.effective_message.reply_document(
-        document=txt, filename=f"{nama_dok}.txt",
-        caption="Versi teks polos 80 kolom (kalau print langsung ke printer dot matrix)",
+        caption=f"{judul} — PDF ukuran kertas 8,5 x 5,5 inch, siap print",
     )
 
 
@@ -1818,8 +1812,16 @@ async def reminder_job(context: ContextTypes.DEFAULT_TYPE):
         logger.exception("gagal baca pengingat")
         return
     chat_ids = [c for c in config.OWNER_TELEGRAM_IDS if c]
+    groups, singles = {}, []
     for rem in due:
-        text, kb = _reminder_message(rem)
+        if rem.get("Jenis") == "kontra_bon":
+            groups.setdefault(rem.get("Nama", ""), []).append(rem)
+        else:
+            singles.append([rem])
+    batches = singles + list(groups.values())
+    for batch in batches:
+        rem = batch[0]
+        text, kb = _kb_list_message(batch) if len(batch) > 1 else _reminder_message(rem)
         sent = False
         for chat_id in chat_ids:
             try:
@@ -1829,9 +1831,64 @@ async def reminder_job(context: ContextTypes.DEFAULT_TYPE):
                 logger.exception("gagal kirim pengingat ke %s", chat_id)
         if sent:
             try:
-                sheets.update_reminder(rem["ID"], Terkirim_Tgl=today)
+                for r in batch:
+                    sheets.update_reminder(r["ID"], Terkirim_Tgl=today)
             except Exception:
                 logger.exception("gagal nandain pengingat terkirim")
+
+
+def _kb_list_message(rems):
+    """Banyak invoice kontra bon 1 customer: pilih satuan atau semua."""
+    rems = rems[:6]
+    nama = rems[0].get("Nama", "")
+    lines = [f"📋 KONTRA BON — {nama}", ""]
+    kb = []
+    for r in rems:
+        lines.append(f"• {r.get('Ref','')} • {rupiah(r.get('Jumlah',0))}")
+        kb.append([InlineKeyboardButton(f"✅ {r.get('Ref','')}", callback_data=f"rm:{r['ID']}:kbm")])
+    ids = ",".join(r["ID"] for r in rems)
+    kb.append([InlineKeyboardButton("✅ Kontra bon semua", callback_data=f"rm:{ids}:kball"),
+               InlineKeyboardButton("⏳ Belum semua", callback_data=f"rm:{ids}:kbnoall")])
+    lines += ["", "Pilih invoice yang udah di-kontra bon (atau semua):"]
+    return "\n".join(lines), InlineKeyboardMarkup(kb)
+
+
+def _kontrabon_done(sheets, rem):
+    import datetime
+    nama, ref, jumlah = rem.get("Nama", ""), rem.get("Ref", ""), rem.get("Jumlah", 0)
+    today = _wib_now().date()
+    sheets.update_reminder(rem["ID"], Status="Selesai")
+    tempo = sheets.get_tempo(nama, "customer")
+    due = today + datetime.timedelta(days=tempo)
+    sheets.add_reminder("bayar_customer", ref, nama, jumlah, due, "Cek pembayaran setelah kontra bon")
+    return tempo, due
+
+
+async def _handle_kb_multi(update, context, data):
+    import datetime
+    import sheets_client as sc
+    query = update.callback_query
+    _, ids, act = data.split(":", 2)
+    sheets = _sheets()
+    today = _wib_now().date()
+    rems = [r for r in (sheets.get_reminder(i) for i in ids.split(",")) if r and str(r.get("Status", "")) == "Aktif"]
+    if not rems:
+        await query.edit_message_text("Pengingat ini udah ditangani.")
+        return
+    if act == "kbnoall":
+        for r in rems:
+            sheets.update_reminder(r["ID"], Tanggal=today + datetime.timedelta(days=1))
+        await query.edit_message_text(f"⏳ Oke. {rems[0].get('Nama','')} gua ingetin lagi besok jam {config.REMINDER_HOUR:02d}.00.")
+        return
+    if act == "kball":
+        done = []
+        for r in rems:
+            tempo, due = _kontrabon_done(sheets, r)
+            done.append(r.get("Ref", ""))
+        await query.edit_message_text(
+            f"✅ Kontra bon {rems[0].get('Nama','')} tercatat ({len(done)} invoice):\n" + "\n".join(done) +
+            f"\nCek pembayaran {tempo} hari lagi: {sc.hari_dari_tanggal(due)}, {sc.tgl_dmy(due)}.")
+        return
 
 
 async def _handle_reminder_callback(update, context, data):
@@ -1841,6 +1898,9 @@ async def _handle_reminder_callback(update, context, data):
     try:
         _, rid, act = data.split(":", 2)
     except ValueError:
+        return
+    if act in ("kball", "kbnoall"):
+        await _handle_kb_multi(update, context, data)
         return
     sheets = _sheets()
     rem = sheets.get_reminder(rid)
@@ -1856,15 +1916,18 @@ async def _handle_reminder_callback(update, context, data):
         await query.edit_message_text(f"⏳ Oke. {nama} ({ref}) gua ingetin lagi besok jam {config.REMINDER_HOUR:02d}.00.")
         return
 
-    if act == "kbok":
-        sheets.update_reminder(rid, Status="Selesai")
-        tempo = sheets.get_tempo(nama, "customer")
-        due = today + datetime.timedelta(days=tempo)
-        sheets.add_reminder("bayar_customer", ref, nama, jumlah, due, "Cek pembayaran setelah kontra bon")
-        await query.edit_message_text(
-            f"✅ Kontra bon {nama} ({ref}) tercatat.\n"
-            f"Gua ingetin cek pembayaran {tempo} hari lagi: {sc.hari_dari_tanggal(due)}, {sc.tgl_dmy(due)}."
-        )
+    if act in ("kbok", "kbm"):
+        tempo, due = _kontrabon_done(sheets, rem)
+        msg = (f"✅ Kontra bon {nama} ({ref}) tercatat.\n"
+               f"Gua ingetin cek pembayaran {tempo} hari lagi: {sc.hari_dari_tanggal(due)}, {sc.tgl_dmy(due)}.")
+        if act == "kbm":
+            sisa = [r for r in sheets.get_active_reminders()
+                    if r.get("Jenis") == "kontra_bon" and r.get("Nama") == nama]
+            if sisa:
+                text, kb = _kb_list_message(sisa)
+                await query.edit_message_text(msg + "\n\n" + text, reply_markup=kb)
+                return
+        await query.edit_message_text(msg)
         return
 
     if act == "payok":

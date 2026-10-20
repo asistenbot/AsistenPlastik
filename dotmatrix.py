@@ -7,7 +7,7 @@ Dua keluaran per dokumen:
   2. Gambar preview (simulasi hasil cetak NLQ) -- buat diliat di chat.
 
 Dokumen yang banyak barangnya otomatis lanjut ke halaman berikutnya.
-Tiap fungsi generate_*_dotmatrix balikin (list_gambar_png, buffer_teks).
+Tiap fungsi generate_*_dotmatrix balikin (list_gambar_png, buffer_teks, buffer_pdf).
 """
 
 import io
@@ -278,10 +278,47 @@ def _render(lines, title):
     return p.png()
 
 
+def _render_clean(lines, title):
+    """Halaman 8,5 x 5,5 inch (300 dpi) dengan huruf biasa (bukan simulasi
+    titik) -- buat PDF yang di-print lewat driver printer. 10 karakter per
+    inch, 6 baris per inch, sama persis kayak file teksnya."""
+    dpi = 300
+    w, h = int(8.5 * dpi), int(5.5 * dpi)
+    cw, lh = dpi / 10, dpi / 6
+    x0, y0 = 0.25 * dpi, 0.2 * dpi
+    img = Image.new("RGB", (w, h), (255, 255, 255))
+    dr = ImageDraw.Draw(img)
+    f1 = ImageFont.truetype(FONT_PATH, int(round(cw / 0.602)))
+    f2 = ImageFont.truetype(FONT_PATH, int(round(2 * cw / 0.602)))
+    ink = (20, 20, 25)
+    for li, s in enumerate(lines):
+        y = y0 + li * lh + lh / 2
+        for ci, ch in enumerate(s):
+            if ch == " ":
+                continue
+            x = x0 + ci * cw
+            if ch in ("─", "═"):
+                ys = [y] if ch == "─" else [y - 4, y + 4]
+                for yy in ys:
+                    dr.line([(x, yy), (x + cw + 1, yy)], fill=ink, width=2)
+                continue
+            dr.text((x, y), ch, font=f1, fill=ink, anchor="lm",
+                    stroke_width=1 if li == 0 else 0, stroke_fill=ink)
+    tx = x0 + (COLS - 2 * len(title)) * cw
+    for i, ch in enumerate(title):
+        dr.text((tx + 2 * i * cw, y0 + lh), ch, font=f2, fill=ink, anchor="lm",
+                stroke_width=1, stroke_fill=ink)
+    return img
+
+
 def _finish(pages):
     pngs = [_render(png_lines, title) for png_lines, _, title in pages]
     txt = "\r\n\f".join("\r\n".join(l.rstrip() for l in txt_lines) for _, txt_lines, _ in pages) + "\r\n"
-    return pngs, io.BytesIO(txt.encode("utf-8"))
+    clean = [_render_clean(png_lines, title) for png_lines, _, title in pages]
+    pdf = io.BytesIO()
+    clean[0].save(pdf, format="PDF", resolution=300.0, save_all=True, append_images=clean[1:])
+    pdf.seek(0)
+    return pngs, io.BytesIO(txt.encode("utf-8")), pdf
 
 
 # ------------------------------------------------------------ public API

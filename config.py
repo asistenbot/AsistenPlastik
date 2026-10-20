@@ -100,6 +100,10 @@ SEED_CUSTOMERS = [
 # ==== NOMOR DOKUMEN ====
 # Format nomor invoice / surat jalan / PO. {seq} diganti nomor urut per hari.
 INVOICE_PREFIX = "INV"
+# Nomor urut invoice jalan terus (gak reset tiap hari) dan mulai dari angka ini,
+# biar nomornya gak keliatan baru/sedikit (INV-20261020-1287, bukan -001).
+# Kalau mau mulai dari angka lain, ganti di sini.
+INVOICE_SEQ_START = 1287
 SURAT_JALAN_PREFIX = "SJ"
 PO_PREFIX = "PO"
 

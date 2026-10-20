@@ -439,9 +439,17 @@ class SheetsClient:
 
     # ---------------- NOMOR DOKUMEN ----------------
 
-    def _next_number(self, prefix, existing_numbers, tanggal=None):
+    def _next_number(self, prefix, existing_numbers, tanggal=None, seq_start=None):
+        """Nomor dokumen PREFIX-YYYYMMDD-NNN. Default: urutan reset tiap hari
+        (mulai 001). Kalau seq_start dikasih: urutan jalan TERUS lintas hari
+        (nomor terbesar yang udah ada + 1) dan gak pernah di bawah seq_start."""
         today = (tanggal or _today_str()).replace("-", "")
         today_prefix = f"{prefix}-{today}-"
+        if seq_start is not None:
+            nums = [int(n.split("-")[-1]) for n in existing_numbers
+                    if n.startswith(f"{prefix}-") and n.split("-")[-1].isdigit()]
+            seq = max(max(nums) + 1 if nums else 0, int(seq_start))
+            return f"{today_prefix}{seq:03d}"
         seq = 1
         used = [n for n in existing_numbers if n.startswith(today_prefix)]
         if used:
@@ -457,7 +465,8 @@ class SheetsClient:
 
     def next_invoice_number(self, tanggal=None):
         existing = [str(r.get("No_Invoice", "")) for r in self.get_all_orders()]
-        return self._next_number(config.INVOICE_PREFIX, existing, tanggal)
+        return self._next_number(config.INVOICE_PREFIX, existing, tanggal,
+                                 seq_start=getattr(config, "INVOICE_SEQ_START", None))
 
     def next_po_number(self):
         existing = [str(r.get("No_PO", "")) for r in self.get_all_pos()]

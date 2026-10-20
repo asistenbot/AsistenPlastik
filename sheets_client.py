@@ -668,6 +668,52 @@ class SheetsClient:
         self._safe_close_reminders(no_invoice, "Selesai")
         return total
 
+    def unmark_order_lunas(self, no_invoice):
+        """Balikin invoice yang kesalahan ditandai Lunas jadi Pending: kosongin
+        Tanggal_Bayar, hapus catatan Kas Masuk 'Pelunasan <inv>', dan pasang
+        lagi pengingat cek pembayaran. Balikin total, atau None kalau gak ketemu."""
+        ws = self._ws(config.SHEET_ORDERS)
+        values = ws.get_all_values()
+        if not values:
+            return None
+        headers = values[0]
+        c_inv, c_st, c_tgl = headers.index("No_Invoice"), headers.index("Status"), headers.index("Tanggal_Bayar")
+        c_sub, c_ong, c_nama = headers.index("Subtotal"), headers.index("Ongkir"), headers.index("Nama_Customer")
+        from gspread.utils import rowcol_to_a1
+        data, total, nama, found = [], 0.0, "", False
+        for i, row in enumerate(values[1:], start=2):
+            if len(row) <= c_inv or row[c_inv] != no_invoice:
+                continue
+            found = True
+            nama = row[c_nama] if len(row) > c_nama else nama
+            for c in (c_sub, c_ong):
+                try:
+                    total += float(row[c] or 0) if len(row) > c else 0
+                except ValueError:
+                    pass
+            data.append({"range": rowcol_to_a1(i, c_st + 1), "values": [["Pending"]]})
+            data.append({"range": rowcol_to_a1(i, c_tgl + 1), "values": [[""]]})
+        if not found:
+            return None
+        ws.batch_update(data)
+        kas = self._ws(config.SHEET_KAS)
+        kv = kas.get_all_values()
+        if kv:
+            kh = kv[0]
+            k_ref, k_ket = kh.index("Ref"), kh.index("Keterangan")
+            rows_del = [i for i, r in enumerate(kv[1:], start=2)
+                        if len(r) > k_ref and r[k_ref] == no_invoice
+                        and len(r) > k_ket and str(r[k_ket]).startswith("Pelunasan")]
+            for i in sorted(rows_del, reverse=True):
+                kas.delete_rows(i)
+        try:
+            tempo = self.get_tempo(nama, "customer")
+            self.add_reminder("bayar_customer", no_invoice, nama, total,
+                              _today_date() + datetime.timedelta(days=tempo), "Dibalikin dari Lunas")
+        except Exception:
+            logger.exception("gagal pasang pengingat ulang %s", no_invoice)
+        return total
+
     def edit_order_header(self, no_invoice, updates):
         """Betulin data header order yang SUDAH kesimpen (nama customer, no
         HP, alamat, metode, no_po_customer, dan/atau tanggal_kirim) -- BUKAN

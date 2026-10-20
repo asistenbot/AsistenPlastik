@@ -421,6 +421,84 @@ async def _do_lunas(update, key):
     )
 
 
+async def _ask_lunas(update, key):
+    """Lunas dari chat bebas: konfirmasi dulu biar gak salah catat."""
+    if not key:
+        await update.effective_message.reply_text("Invoice/customer mana yang mau ditandai lunas?")
+        return
+    sheets = _sheets()
+    inv = key if key.upper().startswith(config.INVOICE_PREFIX) else sheets.get_latest_invoice_for_customer(key)
+    rows = sheets.get_order_items(inv) if inv else []
+    if not rows:
+        await update.effective_message.reply_text(f"Gak ketemu order buat '{key}'.")
+        return
+    if str(rows[0].get("Status", "")) == "Lunas":
+        await update.effective_message.reply_text(f"{inv} udah Lunas.")
+        return
+    total = 0.0
+    for r in rows:
+        try:
+            total += float(r.get("Subtotal", 0) or 0)
+        except (TypeError, ValueError):
+            pass
+    try:
+        total += float(rows[0].get("Ongkir", 0) or 0)
+    except (TypeError, ValueError):
+        pass
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Ya, udah bayar (Lunas)", callback_data=f"lunasok:{inv}"),
+                                InlineKeyboardButton("❌ Batal", callback_data="lunasno")]])
+    await update.effective_message.reply_text(
+        f"{rows[0].get('Nama_Customer','')} - {inv} ({rupiah(total)})\n"
+        "Beneran udah BAYAR / duitnya masuk? (kontra bon belum dihitung lunas)", reply_markup=kb)
+
+
+async def _do_kontrabon(update, key, raw_text=""):
+    """Kontra bon: tampilin tombol Sudah/Belum, BUKAN lunas."""
+    import datetime
+    import re
+    sheets = _sheets()
+    key = (key or "").strip()
+    if not key:
+        key = re.sub(r"(?i)\b(sudah|udah|belum|blm|sdh|di|ke)?\s*kontra\s*-?\s*bon\w*", " ", raw_text or "").strip()
+    if not key:
+        await update.effective_message.reply_text("Kontra bon customer yang mana?")
+        return
+    kl = key.lower()
+    rems = [r for r in sheets.get_active_reminders()
+            if r.get("Jenis") == "kontra_bon" and kl in str(r.get("Nama", "")).lower()]
+    if not rems:
+        inv = key if key.upper().startswith(config.INVOICE_PREFIX) else sheets.get_latest_invoice_for_customer(key)
+        rows = sheets.get_order_items(inv) if inv else []
+        if not rows:
+            await update.effective_message.reply_text(f"Gak ketemu order buat '{key}'.")
+            return
+        if str(rows[0].get("Status", "")) != "Pending":
+            await update.effective_message.reply_text(f"{inv} statusnya {rows[0].get('Status')}, gak perlu kontra bon.")
+            return
+        total = sum(float(r.get("Subtotal", 0) or 0) for r in rows) + float(rows[0].get("Ongkir", 0) or 0)
+        rid = sheets.add_reminder("kontra_bon", inv, rows[0].get("Nama_Customer", ""), total,
+                                  _wib_now().date(), "Manual dari chat")
+        rems = [sheets.get_reminder(rid)]
+    for rem in rems:
+        text, kb = _reminder_message(rem)
+        await update.effective_message.reply_text(text, reply_markup=kb)
+
+
+@owner_only
+async def batallunas_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    key = " ".join(context.args) if context.args else ""
+    if not key.upper().startswith(config.INVOICE_PREFIX):
+        await update.effective_message.reply_text("Pakai nomor invoice: /batallunas INV-20260806-1287")
+        return
+    total = _sheets().unmark_order_lunas(key.upper())
+    if total is None:
+        await update.effective_message.reply_text(f"Invoice {key} gak ketemu.")
+        return
+    await update.effective_message.reply_text(
+        f"↩️ {key.upper()} dibalikin ke Pending ({rupiah(total)}), catatan Kas Masuk-nya dihapus. "
+        "Pengingat cek pembayaran dipasang lagi.")
+
+
 @owner_only
 async def lunas_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _do_lunas(update, " ".join(context.args) if context.args else "")
@@ -691,6 +769,9 @@ async def _route_text(update, context, text):
         route = {"intent": "order"}
 
     intent = route.get("intent", "order")
+    import re as _re
+    if intent != "order" and _re.search(r"kontra\s*-?\s*bon", text, _re.I):
+        intent = "kontra_bon"
     target = (route.get("target") or "").strip()
     bulan = (route.get("bulan") or "").strip()
     jumlah = route.get("jumlah") or 0
@@ -711,8 +792,10 @@ async def _route_text(update, context, text):
             except ValueError:
                 pass
         await _do_laporanbulanan(update, year, month)
+    elif intent == "kontra_bon":
+        await _do_kontrabon(update, target, text)
     elif intent == "mark_lunas":
-        await _do_lunas(update, target)
+        await _ask_lunas(update, target)
     elif intent == "bayar_utang":
         await _do_bayarutang(update, target, float(jumlah) if jumlah else 0)
     elif intent == "lihat_invoice":
@@ -1259,6 +1342,21 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         await query.edit_message_text(f"Oke, ngirim {_DOC_LABEL[kind]} {no_invoice}...")
         await _kirim_dokumen(update, context, no_invoice, kind)
+        return
+
+    if data == "lunasno":
+        await query.edit_message_text("Oke, gak jadi ditandai lunas.")
+        return
+    if data.startswith("lunasok:"):
+        inv = data.split(":", 1)[1]
+        sheets = _sheets()
+        rows = sheets.get_order_items(inv)
+        if not rows or str(rows[0].get("Status", "")) != "Pending":
+            await query.edit_message_text(f"{inv} udah gak Pending, gak diubah.")
+            return
+        total = sheets.mark_order_lunas(inv)
+        sheets.add_kas_entry("Masuk", "Penjualan", total, keterangan=f"Pelunasan {inv}", ref=inv)
+        await query.edit_message_text(f"✅ {inv} ditandai Lunas ({rupiah(total)}), udah dicatat ke Kas Masuk.")
         return
 
     if data.startswith("rm:"):
@@ -1853,6 +1951,7 @@ def main():
     app.add_handler(CommandHandler("groupid", groupid_cmd))
     app.add_handler(CommandHandler("pricelist", pricelist_cmd))
     app.add_handler(CommandHandler("lunas", lunas_cmd))
+    app.add_handler(CommandHandler("batallunas", batallunas_cmd))
     app.add_handler(CommandHandler("invoice", invoice_cmd))
     app.add_handler(CommandHandler("suratjalan", suratjalan_cmd))
     app.add_handler(CommandHandler("dokumen", dokumen_cmd))

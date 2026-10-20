@@ -361,7 +361,11 @@ Daftar intent yang valid:
 - "report_utang" -- nanya utang ke supplier yang belum dibayar
 - "report_kas_bulanan" -- nanya laporan kas / laba rugi / untung rugi bulanan
 - "report_pricelist" -- nanya daftar harga produk
-- "mark_lunas" -- bilang customer tertentu udah bayar / lunas
+- "mark_lunas" -- bilang customer tertentu udah BAYAR / LUNAS (uangnya udah masuk), BUKAN kontra bon
+- "kontra_bon" -- ngomongin KONTRA BON customer (mis. "baso yen sudah kontra bon",
+  "kontrabon pillow cake", "grandia udah di kontra bon"). KONTRA BON BUKAN LUNAS:
+  kontra bon cuma nyerahin tagihan, belum bayar. Kalau ada kata "kontra bon"/
+  "kontrabon", WAJIB pilih "kontra_bon", JANGAN "mark_lunas". target = nama customer.
 - "bayar_utang" -- bilang udah bayar/cicil ke supplier tertentu
 - "lihat_invoice" -- minta liat/cetak ulang invoice customer tertentu
 - "lihat_suratjalan" -- minta liat/cetak ulang surat jalan customer tertentu

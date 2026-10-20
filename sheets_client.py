@@ -34,7 +34,7 @@ SCOPES = [
 SCHEMA = {
     config.SHEET_PRICELIST: [
         "Item_Code", "Nama", "Deskripsi", "Kategori", "Satuan",
-        "Harga_Jual", "Harga_Beli", "Khusus_Customer",
+        "Harga_Jual", "Harga_Beli", "Khusus_Customer", "Supplier",
     ],
     config.SHEET_HARGA_CUSTOMER: ["Customer", "Item_Code", "Harga_Jual"],
     config.SHEET_CUSTOMERS: ["Nama", "No_HP", "Alamat"],
@@ -467,12 +467,24 @@ class SheetsClient:
         rows, skipped = [], 0
         keymap = {"Item_Code": "item_code", "Nama": "nama", "Deskripsi": "deskripsi", "Kategori": "kategori",
                   "Satuan": "satuan", "Harga_Jual": "harga_jual", "Harga_Beli": "harga_beli",
-                  "Khusus_Customer": "khusus"}
+                  "Khusus_Customer": "khusus", "Supplier": "supplier"}
+        from gspread.utils import rowcol_to_a1
+        values = ws.get_all_values()
+        c_code = headers.index("Item_Code")
+        c_sup = headers.index("Supplier") if "Supplier" in headers else None
+        fix = []
         for p in products:
             if p["item_code"].upper() in have:
                 skipped += 1
+                if c_sup is not None and p.get("supplier"):
+                    for i, row in enumerate(values[1:], start=2):
+                        if len(row) > c_code and row[c_code].strip().upper() == p["item_code"].upper() \
+                                and (len(row) <= c_sup or not row[c_sup].strip()):
+                            fix.append({"range": rowcol_to_a1(i, c_sup + 1), "values": [[p["supplier"]]]})
                 continue
             rows.append([p.get(keymap.get(h, ""), "") for h in headers])
+        if fix:
+            ws.batch_update(fix)
         if rows:
             ws.append_rows(rows, value_input_option="RAW")
         return len(rows), skipped

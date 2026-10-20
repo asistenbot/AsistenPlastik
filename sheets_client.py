@@ -402,8 +402,10 @@ class SheetsClient:
             ws.append_row([nama, new_vals.get("No_HP", ""), new_vals.get("Alamat", "")],
                           value_input_option="RAW")
         else:
-            for col_name, v in new_vals.items():
-                ws.update_cell(row_idx, headers.index(col_name) + 1, v, value_input_option="RAW")
+            ws.batch_update(
+                [{"range": rowcol_to_a1(row_idx, headers.index(col_name) + 1), "values": [[v]]}
+                 for col_name, v in new_vals.items()],
+            )
 
         # --- invoice Pending ---
         wo = self._ws(config.SHEET_ORDERS)
@@ -422,7 +424,7 @@ class SheetsClient:
             for col_name, v in new_vals.items():
                 data.append({"range": rowcol_to_a1(i, oh.index(col_name) + 1), "values": [[v]]})
         if data:
-            wo.batch_update(data, value_input_option="RAW")
+            wo.batch_update(data)
         return len(invoices)
 
     def add_customer_if_new(self, nama, no_hp="", alamat=""):
@@ -505,6 +507,36 @@ class SheetsClient:
                 continue
             out.append(r)
         return out
+
+    def find_customer_invoices(self, key, limit=8):
+        """Daftar invoice (tanpa yang Batal) buat 1 customer, terbaru dulu.
+        Nama dicocokin persis dulu; kalau gak ada, cocokin sebagian (mis.
+        'pillow' ketemu 'Pillow Cake'). Tiap item: {no_invoice, nama, tanggal,
+        total, status}."""
+        key_l = (key or "").strip().lower()
+        if not key_l:
+            return []
+        rows = [r for r in self.get_all_orders() if str(r.get("Status", "")) != "Batal"]
+        match = [r for r in rows if str(r.get("Nama_Customer", "")).strip().lower() == key_l]
+        if not match:
+            match = [r for r in rows if key_l in str(r.get("Nama_Customer", "")).strip().lower()]
+        by_inv = {}
+        for r in match:
+            inv = str(r.get("No_Invoice", ""))
+            d = by_inv.setdefault(inv, {"no_invoice": inv, "nama": r.get("Nama_Customer", ""),
+                                        "tanggal": str(r.get("Timestamp", ""))[:10],
+                                        "total": 0.0, "status": r.get("Status", ""), "_ts": str(r.get("Timestamp", ""))})
+            try:
+                d["total"] += float(r.get("Subtotal", 0) or 0)
+            except (TypeError, ValueError):
+                pass
+        for inv, d in by_inv.items():
+            first = next((r for r in match if str(r.get("No_Invoice", "")) == inv), None)
+            try:
+                d["total"] += float(first.get("Ongkir", 0) or 0)
+            except (TypeError, ValueError, AttributeError):
+                pass
+        return sorted(by_inv.values(), key=lambda d: d["_ts"], reverse=True)[:limit]
 
     def get_latest_invoice_for_customer(self, nama_customer):
         orders = self.get_orders_by_customer(nama_customer)
@@ -589,8 +621,10 @@ class SheetsClient:
                 cell_updates.append((idx, col, val))
         if not found:
             return False
-        for r, c, v in cell_updates:
-            ws.update_cell(r, c, v, value_input_option="RAW")
+        from gspread.utils import rowcol_to_a1
+        ws.batch_update(
+            [{"range": rowcol_to_a1(r, c), "values": [[v]]} for r, c, v in cell_updates],
+        )  # batch_update default-nya RAW (+62 / 0813 aman)
         if "nama_customer" in updates and (updates.get("nama_customer") or "").strip():
             self.add_customer_if_new(updates["nama_customer"].strip())
         return True

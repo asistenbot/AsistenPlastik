@@ -271,6 +271,8 @@ Command di bawah ini cadangan aja kalau mau lebih pasti/cepat:
 /pricelist — lihat daftar harga produk
 /invoice <no invoice atau nama customer> — cetak ulang invoice
 /suratjalan <no invoice atau nama customer> — cetak ulang surat jalan
+/dokumen <no invoice atau nama customer> — cetak ulang invoice + surat jalan
+(kalau customer punya banyak invoice, bot kasih daftar buat dipilih)
 /lunas <no invoice atau nama customer> — tandai order sudah dibayar
 /piutang — rekap tagihan customer yang belum lunas
 
@@ -382,16 +384,53 @@ async def lunas_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _do_lunas(update, " ".join(context.args) if context.args else "")
 
 
-async def _do_invoice_lookup(update, context, key):
+_DOC_LABEL = {"inv": "Invoice", "sj": "Surat Jalan", "both": "Invoice + Surat Jalan"}
+
+
+async def _kirim_dokumen(update, context, no_invoice, kind):
+    if kind in ("inv", "both"):
+        await _kirim_invoice(update, context, no_invoice)
+    if kind in ("sj", "both"):
+        await _kirim_surat_jalan(update, context, no_invoice)
+
+
+async def _lookup_dokumen(update, context, key, kind):
+    """Cetak ulang invoice / surat jalan. Kalau yang disebut nomor invoice,
+    langsung dikirim. Kalau nama customer dan dia punya >1 invoice, tampilin
+    daftar invoice-nya buat dipilih; kalau cuma 1, langsung dikirim."""
+    key = (key or "").strip()
     if not key:
-        await update.effective_message.reply_text("Invoice/customer mana yang mau dicetak ulang?")
+        await update.effective_message.reply_text(
+            f"Invoice/customer mana yang mau dicetak ulang {_DOC_LABEL[kind]}-nya? "
+            "Sebutin nomor invoice atau nama customer."
+        )
         return
-    sheets = _sheets()
-    no_invoice = key if key.upper().startswith(config.INVOICE_PREFIX) else sheets.get_latest_invoice_for_customer(key)
-    if not no_invoice:
+    if key.upper().startswith(config.INVOICE_PREFIX):
+        await _kirim_dokumen(update, context, key, kind)
+        return
+    invs = _sheets().find_customer_invoices(key)
+    if not invs:
         await update.effective_message.reply_text(f"Gak ketemu order buat '{key}'.")
         return
-    await _kirim_invoice(update, context, no_invoice)
+    if len(invs) == 1:
+        await _kirim_dokumen(update, context, invs[0]["no_invoice"], kind)
+        return
+    rows = []
+    for d in invs:
+        icon = "✅" if d["status"] == "Lunas" else "⏳"
+        rows.append([InlineKeyboardButton(
+            f"{icon} {d['no_invoice']} • {d['tanggal']} • {rupiah(d['total'])}",
+            callback_data=f"doc:{kind}:{d['no_invoice']}",
+        )])
+    await update.effective_message.reply_text(
+        f"{invs[0]['nama']} punya {len(invs)} invoice (terbaru di atas). "
+        f"Pilih yang mau dicetak ({_DOC_LABEL[kind]}):  ✅ lunas, ⏳ belum lunas",
+        reply_markup=InlineKeyboardMarkup(rows),
+    )
+
+
+async def _do_invoice_lookup(update, context, key):
+    await _lookup_dokumen(update, context, key, "inv")
 
 
 @owner_only
@@ -400,20 +439,17 @@ async def invoice_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _do_suratjalan_lookup(update, context, key):
-    if not key:
-        await update.effective_message.reply_text("Invoice/customer mana yang mau dicetak ulang surat jalannya?")
-        return
-    sheets = _sheets()
-    no_invoice = key if key.upper().startswith(config.INVOICE_PREFIX) else sheets.get_latest_invoice_for_customer(key)
-    if not no_invoice:
-        await update.effective_message.reply_text(f"Gak ketemu order buat '{key}'.")
-        return
-    await _kirim_surat_jalan(update, context, no_invoice)
+    await _lookup_dokumen(update, context, key, "sj")
 
 
 @owner_only
 async def suratjalan_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _do_suratjalan_lookup(update, context, " ".join(context.args) if context.args else "")
+
+
+@owner_only
+async def dokumen_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _lookup_dokumen(update, context, " ".join(context.args) if context.args else "", "both")
 
 
 async def _kirim_dotmatrix(update, judul, nama_file, pages, txt):
@@ -1164,6 +1200,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
 
+    if data.startswith("doc:"):
+        try:
+            _, kind, no_invoice = data.split(":", 2)
+        except ValueError:
+            return
+        if kind not in _DOC_LABEL:
+            return
+        await query.edit_message_text(f"Oke, ngirim {_DOC_LABEL[kind]} {no_invoice}...")
+        await _kirim_dokumen(update, context, no_invoice, kind)
+        return
+
     if data == "order_cancel":
         context.user_data.pop("pending_order", None)
         await query.edit_message_text("Order dibatalin.")
@@ -1575,6 +1622,7 @@ def main():
     app.add_handler(CommandHandler("lunas", lunas_cmd))
     app.add_handler(CommandHandler("invoice", invoice_cmd))
     app.add_handler(CommandHandler("suratjalan", suratjalan_cmd))
+    app.add_handler(CommandHandler("dokumen", dokumen_cmd))
     app.add_handler(CommandHandler("piutang", piutang_cmd))
     app.add_handler(CommandHandler("po", po_cmd))
     app.add_handler(CommandHandler("bayarutang", bayarutang_cmd))

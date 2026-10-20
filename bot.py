@@ -2236,6 +2236,15 @@ async def _notify_web_order(app, pid, parsed):
 
 
 @owner_only
+async def importgrandia_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from data_grandia import PRODUK_GRANDIA
+    n, skip = _sheets().add_products_bulk(PRODUK_GRANDIA)
+    await update.effective_message.reply_text(
+        f"✅ {n} produk kantong sampah Tulip masuk ke PriceList (khusus Grandia)"
+        + (f", {skip} dilewat karena kodenya udah ada." if skip else "."))
+
+
+@owner_only
 async def linkorder_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     nama = " ".join(context.args).strip() if context.args else ""
     if not nama:
@@ -2289,6 +2298,7 @@ def main():
     app.add_handler(CommandHandler("pricelist", pricelist_cmd))
     app.add_handler(CommandHandler("topik", topik_cmd))
     app.add_handler(CommandHandler("linkorder", linkorder_cmd))
+    app.add_handler(CommandHandler("importgrandia", importgrandia_cmd))
     app.add_error_handler(error_handler)
     app.add_handler(CommandHandler("lunas", lunas_cmd))
     app.add_handler(CommandHandler("batallunas", batallunas_cmd))

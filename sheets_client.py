@@ -458,6 +458,25 @@ class SheetsClient:
             return True
         return False
 
+    def add_products_bulk(self, products):
+        """products: list dict {item_code,nama,deskripsi,kategori,satuan,harga_jual,
+        harga_beli,khusus}. Kode yang udah ada dilewat. Balikin (ditambah, dilewat)."""
+        ws = self._ws(config.SHEET_PRICELIST)
+        headers = ws.row_values(1)
+        have = {str(r.get("Item_Code", "")).strip().upper() for r in self.get_price_list()}
+        rows, skipped = [], 0
+        keymap = {"Item_Code": "item_code", "Nama": "nama", "Deskripsi": "deskripsi", "Kategori": "kategori",
+                  "Satuan": "satuan", "Harga_Jual": "harga_jual", "Harga_Beli": "harga_beli",
+                  "Khusus_Customer": "khusus"}
+        for p in products:
+            if p["item_code"].upper() in have:
+                skipped += 1
+                continue
+            rows.append([p.get(keymap.get(h, ""), "") for h in headers])
+        if rows:
+            ws.append_rows(rows, value_input_option="RAW")
+        return len(rows), skipped
+
     def add_product(self, item_code, nama, deskripsi="", kategori="", satuan="", harga_jual=0, harga_beli=0):
         """Tambah 1 baris produk BARU ke PriceList. item_code WAJIB unik --
         kalau kode itu udah kepake, gak nambah apa-apa (balikin False) biar

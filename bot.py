@@ -578,7 +578,7 @@ async def dokumen_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------------- TOPIK GRUP ----------------
 TOPIK_LABEL = {
     "order": "🛒 Order", "invoice": "🧾 Invoice", "suratjalan": "🚚 Surat Jalan",
-    "po": "📦 PO Supplier", "pengingat": "⏰ Pengingat", "error": "⚠️ Error",
+    "po": "📦 PO Supplier", "rekap": "📊 Rekap Bulanan", "pengingat": "⏰ Pengingat", "error": "⚠️ Error",
 }
 _TOPIK_CACHE = {"data": None}
 
@@ -760,7 +760,7 @@ BULAN_NAMA = ["", "Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli"
               "Agustus", "September", "Oktober", "November", "Desember"]
 
 
-async def _do_laporanbulanan(update, year, month):
+def _teks_laporan(year, month):
     lap = _sheets().get_laporan_bulanan(year, month)
     lines = [f"*Laporan Kas — {BULAN_NAMA[month]} {year}*", ""]
     lines.append("Kas Masuk:")
@@ -774,7 +774,41 @@ async def _do_laporanbulanan(update, year, month):
     lines.append(f"Total Keluar: {rupiah(lap['total_keluar'])}")
     lines.append("")
     lines.append(f"*Laba/Rugi bersih: {rupiah(lap['laba'])}*")
-    await _send_text(update, "\n".join(lines))
+    return "\n".join(lines)
+
+
+async def _do_laporanbulanan(update, year, month):
+    teks = _teks_laporan(year, month)
+    await _send_text(update, teks)
+    m = update.effective_message
+    await _mirror(m.get_bot(), "rekap", skip_chat=update.effective_chat.id,
+                  skip_thread=m.message_thread_id if getattr(m, "is_topic_message", False) else None,
+                  text=teks.replace("*", ""))
+
+
+async def rekap_job(context: ContextTypes.DEFAULT_TYPE):
+    """Tiap tanggal 1 (>= jam 08 WIB): kirim rekap bulan lalu otomatis, sekali aja."""
+    now = _wib_now()
+    if now.day != 1 or now.hour < config.REMINDER_HOUR:
+        return
+    import datetime
+    last = now.replace(day=1) - datetime.timedelta(days=1)
+    ref = f"REKAP-{last.year}-{last.month:02d}"
+    try:
+        sheets = _sheets()
+        if any(str(r.get("Ref", "")) == ref for r in sheets._reminder_records()):
+            return
+        teks = _teks_laporan(last.year, last.month)
+        for chat_id in [c for c in config.OWNER_TELEGRAM_IDS if c]:
+            try:
+                await context.bot.send_message(chat_id=chat_id, text=teks, parse_mode=ParseMode.MARKDOWN)
+            except Exception:
+                logger.exception("gagal kirim rekap ke %s", chat_id)
+        await _mirror(context.bot, "rekap", text=teks.replace("*", ""))
+        rid = sheets.add_reminder("rekap", ref, "Rekap Bulanan", 0, now.date(), "Rekap otomatis")
+        sheets.update_reminder(rid, Status="Selesai")
+    except Exception:
+        logger.exception("gagal kirim rekap bulanan")
 
 
 @owner_only
@@ -2120,6 +2154,7 @@ def main():
         logger.error("JobQueue gak aktif -- pengingat gak jalan. Pastikan requirements pakai python-telegram-bot[job-queue].")
     else:
         app.job_queue.run_repeating(reminder_job, interval=600, first=45)
+        app.job_queue.run_repeating(rekap_job, interval=3600, first=120)
 
     logger.info("Starting polling...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)

@@ -364,6 +364,67 @@ class SheetsClient:
     def get_customer_names(self):
         return [str(r.get("Nama", "")).strip() for r in self.get_customers() if r.get("Nama")]
 
+    def get_customer(self, nama):
+        """Baris Customers yang namanya sama (case-insensitive), atau None."""
+        nama_lower = (nama or "").strip().lower()
+        if not nama_lower:
+            return None
+        for r in self.get_customers():
+            if str(r.get("Nama", "")).strip().lower() == nama_lower:
+                return r
+        return None
+
+    def update_customer(self, nama, no_hp=None, alamat=None):
+        """Update data customer SECARA PERMANEN: baris di sheet Customers
+        (dibuat kalau belum ada) + semua invoice customer ini yang masih
+        Pending (belum lunas). Invoice yang udah Lunas/Batal dibiarin biar
+        arsipnya gak berubah. Balikin jumlah invoice Pending yang keupdate."""
+        from gspread.utils import rowcol_to_a1
+        nama = (nama or "").strip()
+        new_vals = {}
+        if (no_hp or "").strip():
+            new_vals["No_HP"] = no_hp.strip()
+        if (alamat or "").strip():
+            new_vals["Alamat"] = alamat.strip()
+        if not nama or not new_vals:
+            return 0
+
+        # --- sheet Customers ---
+        ws = self._ws(config.SHEET_CUSTOMERS)
+        values = ws.get_all_values()
+        headers = values[0] if values else []
+        row_idx = None
+        for i, row in enumerate(values[1:], start=2):
+            if row and row[0].strip().lower() == nama.lower():
+                row_idx = i
+                break
+        if row_idx is None:
+            ws.append_row([nama, new_vals.get("No_HP", ""), new_vals.get("Alamat", "")],
+                          value_input_option="RAW")
+        else:
+            for col_name, v in new_vals.items():
+                ws.update_cell(row_idx, headers.index(col_name) + 1, v, value_input_option="RAW")
+
+        # --- invoice Pending ---
+        wo = self._ws(config.SHEET_ORDERS)
+        ov = wo.get_all_values()
+        if not ov:
+            return 0
+        oh = ov[0]
+        c_inv, c_name, c_status = (oh.index("No_Invoice"), oh.index("Nama_Customer"), oh.index("Status"))
+        data, invoices = [], set()
+        for i, row in enumerate(ov[1:], start=2):
+            if len(row) <= max(c_inv, c_name, c_status):
+                continue
+            if row[c_name].strip().lower() != nama.lower() or row[c_status] != "Pending":
+                continue
+            invoices.add(row[c_inv])
+            for col_name, v in new_vals.items():
+                data.append({"range": rowcol_to_a1(i, oh.index(col_name) + 1), "values": [[v]]})
+        if data:
+            wo.batch_update(data, value_input_option="RAW")
+        return len(invoices)
+
     def add_customer_if_new(self, nama, no_hp="", alamat=""):
         nama = (nama or "").strip()
         if not nama:
@@ -529,7 +590,7 @@ class SheetsClient:
         if not found:
             return False
         for r, c, v in cell_updates:
-            ws.update_cell(r, c, v)
+            ws.update_cell(r, c, v, value_input_option="RAW")
         if "nama_customer" in updates and (updates.get("nama_customer") or "").strip():
             self.add_customer_if_new(updates["nama_customer"].strip())
         return True

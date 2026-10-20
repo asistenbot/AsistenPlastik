@@ -59,6 +59,21 @@ def _sheets():
     return get_sheets_client()
 
 
+def _fill_customer_defaults(parsed, sheets):
+    """Kalau order nyebut customer yang udah ada di sheet Customers tapi no HP
+    / alamatnya kosong, isi otomatis dari data customer."""
+    try:
+        cust = sheets.get_customer(parsed.get("nama_customer", ""))
+    except Exception:
+        logger.exception("gagal cari data customer")
+        return
+    if not cust:
+        return
+    for field, col in (("no_hp", "No_HP"), ("alamat", "Alamat")):
+        if not (parsed.get(field) or "").strip() and str(cust.get(col, "") or "").strip():
+            parsed[field] = str(cust[col]).strip()
+
+
 _PENDING_KEYS = ("pending_order", "pending_po", "pending_edit", "pending_price_update", "pending_cancel", "pending_cancel_po")
 
 
@@ -641,6 +656,7 @@ async def _process_order_text(update, context, text):
         await update.effective_message.reply_text(f"Waduh, gagal baca order ini: {e}")
         return
     parsed["items"] = _resolve_items_with_price(parsed.get("items", []), sheets)
+    _fill_customer_defaults(parsed, sheets)
 
     # Safety net: kalau AI gak nemu barang order sama sekali, jangan tunjukin
     # preview order kosong (Rp0) dengan tombol Simpan -- bikin bingung dan
@@ -786,10 +802,22 @@ async def _do_edit_order(update, context, target, text):
         )
         return
 
+    # Kalau yang diganti cuma data customer (no HP / alamat) dan user nyebut
+    # NAMA customer (bukan nomor invoice), kemungkinan besar maksudnya data
+    # customer-nya, bukan 1 invoice lama -- tawarin update permanen.
+    customer_level = (
+        bool(target) and not str(target).upper().startswith(config.INVOICE_PREFIX)
+        and not item_updates and set(updates) <= {"no_hp", "alamat"}
+    )
+    nama_cust = (first.get("Nama_Customer", "") or "").strip()
     context.user_data["pending_edit"] = {
         "no_invoice": no_invoice, "updates": updates, "item_updates": item_updates,
+        "customer_nama": nama_cust if customer_level else "",
     }
-    lines = [f"*Mau diganti di {no_invoice}:*", ""]
+    if customer_level:
+        lines = [f"*Mau diganti buat customer {nama_cust}:*", ""]
+    else:
+        lines = [f"*Mau diganti di {no_invoice}:*", ""]
     for k, v in updates.items():
         lama = first.get(_EDIT_FIELD_COLUMN[k], "") or "-"
         lines.append(f"• {_EDIT_FIELD_LABEL[k]}: {lama} → *{v}*")
@@ -809,10 +837,23 @@ async def _do_edit_order(update, context, target, text):
                 f"• Harga satuan {iu['nama']} (order ini aja): "
                 f"{rupiah(iu['harga_lama'])} → *{rupiah(iu['harga_baru'])}*"
             )
-    kb = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Simpan Perubahan", callback_data="editorder_confirm"),
-        InlineKeyboardButton("❌ Batal", callback_data="editorder_cancel"),
-    ]])
+    if customer_level:
+        lines += [
+            "",
+            f"👤 *Update Customer*: simpan permanen di data customer + invoice "
+            f"{nama_cust} yang belum lunas, dan order baru otomatis pakai ini.",
+            f"📄 *Cuma Invoice Ini*: cuma {no_invoice} yang berubah.",
+        ]
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("👤 Update Customer", callback_data="custupdate_confirm")],
+            [InlineKeyboardButton("📄 Cuma Invoice Ini", callback_data="editorder_confirm"),
+             InlineKeyboardButton("❌ Batal", callback_data="editorder_cancel")],
+        ])
+    else:
+        kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Simpan Perubahan", callback_data="editorder_confirm"),
+            InlineKeyboardButton("❌ Batal", callback_data="editorder_cancel"),
+        ]])
     await _send_text(update, "\n".join(lines), reply_markup=kb)
 
 
@@ -1055,6 +1096,7 @@ async def _process_order_photo(update, context):
         await update.effective_message.reply_text(f"Waduh, gagal baca foto ini: {e}")
         return
     parsed["items"] = _resolve_items_with_price(parsed.get("items", []), sheets)
+    _fill_customer_defaults(parsed, sheets)
 
     # Safety net: kalau AI gak nemu barang order sama sekali (misal fotonya
     # ternyata price list/dokumen lain, bukan order customer), JANGAN
@@ -1141,6 +1183,23 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "editorder_cancel":
         context.user_data.pop("pending_edit", None)
         await query.edit_message_text("Gak jadi diedit.")
+        return
+
+    if data == "custupdate_confirm":
+        pending = context.user_data.pop("pending_edit", None)
+        if not pending or not pending.get("customer_nama"):
+            await query.edit_message_text("Perubahannya udah gak ada / kadaluarsa, coba ulang.")
+            return
+        sheets = _sheets()
+        nama = pending["customer_nama"]
+        ups = pending.get("updates", {})
+        n_inv = sheets.update_customer(nama, no_hp=ups.get("no_hp"), alamat=ups.get("alamat"))
+        bagian = " & ".join(_EDIT_FIELD_LABEL[k] for k in ("no_hp", "alamat") if ups.get(k))
+        await query.edit_message_text(
+            f"✅ {bagian} {nama} udah diupdate di data customer"
+            + (f" + {n_inv} invoice yang belum lunas." if n_inv else ".")
+            + "\nOrder berikutnya otomatis pakai data baru ini."
+        )
         return
 
     if data == "editorder_confirm":

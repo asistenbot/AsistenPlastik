@@ -21,6 +21,7 @@ from telegram.ext import (
 
 import config
 import documents
+import dotmatrix
 from ai_parser import (
     parse_order_text, parse_order_image, parse_po_text, classify_intent,
     parse_order_correction, parse_price_update, parse_price_update_image,
@@ -415,6 +416,18 @@ async def suratjalan_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _do_suratjalan_lookup(update, context, " ".join(context.args) if context.args else "")
 
 
+async def _kirim_dotmatrix(update, judul, nama_file, pages, txt):
+    """Kirim preview tiap halaman (gambar) + file teks yang di-print di dot matrix."""
+    n = len(pages)
+    for i, png in enumerate(pages, 1):
+        cap = judul + (f" (hal {i}/{n})" if n > 1 else "")
+        await update.effective_message.reply_photo(photo=png, caption=cap)
+    await update.effective_message.reply_document(
+        document=txt, filename=nama_file,
+        caption="File teks buat print dot matrix (80 kolom, kertas 8,5 x 5,5 inch)",
+    )
+
+
 async def _kirim_invoice(update, context, no_invoice):
     sheets = _sheets()
     rows = sheets.get_order_items(no_invoice)
@@ -429,16 +442,13 @@ async def _kirim_invoice(update, context, no_invoice):
             ongkir += float(r.get("Ongkir", 0) or 0)
         except ValueError:
             pass
-    img, pdf = documents.generate_invoice_image(
+    pages, txt = dotmatrix.generate_invoice_dotmatrix(
         no_invoice, first["Nama_Customer"], first.get("No_HP", ""), first.get("Alamat", ""),
         first.get("Metode", "Kirim"), items, ongkir,
         no_po_customer=first.get("No_PO_Customer", ""),
         tanggal_kirim=first.get("Tanggal_Kirim", ""),
     )
-    await update.effective_message.reply_photo(photo=img, caption=f"Invoice {no_invoice}")
-    await update.effective_message.reply_document(
-        document=pdf, filename=f"{no_invoice}.pdf", caption="Versi PDF (siap print A4)"
-    )
+    await _kirim_dotmatrix(update, f"Invoice {no_invoice}", f"{no_invoice}.txt", pages, txt)
 
 
 async def _kirim_surat_jalan(update, context, no_invoice):
@@ -450,16 +460,13 @@ async def _kirim_surat_jalan(update, context, no_invoice):
     first = rows[0]
     items = [{"nama_item": r["Nama_Item"], "qty": r["Qty"], "satuan": r["Satuan"]} for r in rows]
     no_sj = no_invoice.replace(config.INVOICE_PREFIX, config.SURAT_JALAN_PREFIX, 1)
-    img, pdf = documents.generate_surat_jalan_image(
+    pages, txt = dotmatrix.generate_surat_jalan_dotmatrix(
         no_sj, first["Nama_Customer"], first.get("No_HP", ""), first.get("Alamat", ""),
         first.get("Metode", "Kirim"), items, no_invoice_ref=no_invoice,
         no_po_customer=first.get("No_PO_Customer", ""),
         tanggal_kirim=first.get("Tanggal_Kirim", ""),
     )
-    await update.effective_message.reply_photo(photo=img, caption=f"Surat Jalan {no_sj}")
-    await update.effective_message.reply_document(
-        document=pdf, filename=f"{no_sj}.pdf", caption="Versi PDF (siap print A4)"
-    )
+    await _kirim_dotmatrix(update, f"Surat Jalan {no_sj}", f"{no_sj}.txt", pages, txt)
 
 
 # ---------------- KAS & LAPORAN ----------------

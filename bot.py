@@ -2253,7 +2253,8 @@ async def linkorder_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sheets = _sheets()
     cust = sheets.get_customer(nama)
     if not cust:
-        cands = [c for c in sheets.get_customer_names() if nama.lower() in str(c).lower()]
+        norm = lambda x: "".join(str(x).lower().split())
+        cands = [c for c in sheets.get_customer_names() if norm(nama) in norm(c)]
         if len(cands) == 1:
             nama = cands[0]
         elif not cands:

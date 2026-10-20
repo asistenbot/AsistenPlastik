@@ -427,8 +427,11 @@ async def _ask_lunas(update, key):
         await update.effective_message.reply_text("Invoice/customer mana yang mau ditandai lunas?")
         return
     sheets = _sheets()
-    inv = key if key.upper().startswith(config.INVOICE_PREFIX) else sheets.get_latest_invoice_for_customer(key)
-    rows = sheets.get_order_items(inv) if inv else []
+    inv = key if key.upper().startswith(config.INVOICE_PREFIX) else await _pilih_invoice(
+        update, key, "lpick", "Pilih yang udah dibayar:", hanya_pending=True)
+    if not inv:
+        return
+    rows = sheets.get_order_items(inv)
     if not rows:
         await update.effective_message.reply_text(f"Gak ketemu order buat '{key}'.")
         return
@@ -971,10 +974,12 @@ async def _do_edit_order(update, context, target, text):
     no_invoice = None
     if target and target.upper().startswith(config.INVOICE_PREFIX):
         no_invoice = target
+    elif target:
+        no_invoice = await _pilih_invoice(update, target, "cpick", "Pilih yang mau dibatalin:")
+        if not no_invoice:
+            return
     if not no_invoice:
         no_invoice = context.user_data.get("last_invoice")
-    if not no_invoice and target:
-        no_invoice = sheets.get_latest_invoice_for_customer(target)
     if not no_invoice:
         await update.effective_message.reply_text(
             "Order/invoice yang mana yang mau diedit? Sebutin nomor invoice-nya "
@@ -1134,6 +1139,55 @@ async def _do_edit_order(update, context, target, text):
     await _send_text(update, "\n".join(lines), reply_markup=kb)
 
 
+async def _pilih_invoice(update, key, prefix, judul, hanya_pending=False):
+    """Resolusi invoice dari nama customer. Balikin no_invoice kalau pasti
+    (cuma 1), None kalau gak ada / lagi nampilin pilihan tombol (callback
+    `<prefix>:<inv>`)."""
+    invs = _sheets().find_customer_invoices(key)
+    if hanya_pending:
+        invs = [d for d in invs if d["status"] != "Lunas"]
+    if not invs:
+        await update.effective_message.reply_text(f"Gak ketemu invoice buat '{key}'.")
+        return None
+    if len(invs) == 1:
+        return invs[0]["no_invoice"]
+    rows = []
+    for d in invs:
+        icon = "✅" if d["status"] == "Lunas" else "⏳"
+        rows.append([InlineKeyboardButton(f"{icon} {d['no_invoice']} • {d['tanggal']} • {rupiah(d['total'])}",
+                                          callback_data=f"{prefix}:{d['no_invoice']}")])
+    await update.effective_message.reply_text(
+        f"{invs[0]['nama']} punya {len(invs)} invoice. {judul}  (✅ lunas, ⏳ belum lunas)",
+        reply_markup=InlineKeyboardMarkup(rows))
+    return None
+
+
+async def _pilih_po(update, key, prefix, judul):
+    pos = {}
+    for r in _sheets().get_all_pos():
+        if str(r.get("Status", "")) == "Batal":
+            continue
+        if key.lower() not in str(r.get("Nama_Supplier", "")).lower():
+            continue
+        d = pos.setdefault(str(r.get("No_PO", "")), {"tgl": str(r.get("Timestamp", ""))[:10], "total": 0.0,
+                                                    "nama": r.get("Nama_Supplier", "")})
+        try:
+            d["total"] += float(r.get("Subtotal", 0) or 0)
+        except (TypeError, ValueError):
+            pass
+    if not pos:
+        await update.effective_message.reply_text(f"Gak ketemu PO buat '{key}'.")
+        return None
+    if len(pos) == 1:
+        return next(iter(pos))
+    items = sorted(pos.items(), key=lambda kv: kv[1]["tgl"], reverse=True)[:8]
+    rows = [[InlineKeyboardButton(f"{no} • {d['tgl']} • {rupiah(d['total'])}", callback_data=f"{prefix}:{no}")]
+            for no, d in items]
+    await update.effective_message.reply_text(f"{items[0][1]['nama']} punya {len(pos)} PO. {judul}",
+                                              reply_markup=InlineKeyboardMarkup(rows))
+    return None
+
+
 async def _do_cancel_order(update, context, target):
     sheets = _sheets()
 
@@ -1190,10 +1244,12 @@ async def _do_cancel_po(update, context, target):
     no_po = None
     if target and target.upper().startswith(config.PO_PREFIX):
         no_po = target
+    elif target:
+        no_po = await _pilih_po(update, target, "cpopick", "Pilih PO yang mau dibatalin:")
+        if not no_po:
+            return
     if not no_po:
         no_po = context.user_data.get("last_po")
-    if not no_po and target:
-        no_po = sheets.get_latest_po_for_supplier(target)
     if not no_po:
         await update.effective_message.reply_text(
             "PO yang mana yang mau dibatalin? Sebutin nomor PO-nya atau nama supplier-nya."
@@ -1443,6 +1499,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         await query.edit_message_text(f"Oke, ngirim {_DOC_LABEL[kind]} {no_invoice}...")
         await _kirim_dokumen(update, context, no_invoice, kind)
+        return
+
+    if data.startswith(("cpick:", "cpopick:", "lpick:")):
+        kind, val = data.split(":", 1)
+        await query.edit_message_text(f"Oke, {val} dipilih.")
+        if kind == "cpick":
+            await _do_cancel_order(update, context, val)
+        elif kind == "cpopick":
+            await _do_cancel_po(update, context, val)
+        else:
+            await _ask_lunas(update, val)
         return
 
     if data == "lunasno":

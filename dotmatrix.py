@@ -96,7 +96,9 @@ def _row(cells, widths, aligns):
 
 
 def _hl(ch="-"):
-    return ch * COLS
+    """Garis pemisah penuh 80 kolom. '-' -> garis tunggal lurus, '=' -> garis
+    ganda lurus (karakter garis bawaan printer, bukan titik2 tanda minus)."""
+    return ("─" if ch == "-" else "═") * COLS
 
 
 # ------------------------------------------------------------ susun halaman
@@ -218,6 +220,12 @@ class _Page:
     def glyph(self, ch, col, line, m=1, bold=False):
         ox = self.pad + MX + col * CW
         oy = self.pad + MY + line * LH
+        if ch == "═":
+            for dy in (-4, 4):
+                n = int(CW / 2.6)
+                for i in range(n + 1):
+                    self.dot(ox + CW * i / n, oy + 30 + dy)
+            return
         if ch in BOX:
             fl = BOX[ch]
             cx, cy = ox + CW / 2, oy + 30

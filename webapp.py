@@ -71,12 +71,25 @@ def _item_label(row):
     return nama
 
 
-def _boleh_lihat(row, nama_customer):
-    """Item khusus customer tertentu (kolom Khusus_Customer) cuma tampil buat dia."""
+def _khusus_milik(row, nama_customer):
     k = str(row.get("Khusus_Customer", "") or "").strip().lower()
-    if not k:
-        return True
-    return any(x.strip() and x.strip() in nama_customer.lower() for x in k.split(","))
+    return bool(k) and any(x.strip() and x.strip() in nama_customer.lower() for x in k.split(","))
+
+
+def _boleh_lihat(row, nama_customer, rows=None, khusus_harga=None):
+    """Aturan katalog link customer:
+    - item khusus customer LAIN: gak pernah tampil.
+    - kalau customer ini punya item khusus (kolom Khusus_Customer) atau harga
+      khusus (tab HargaCustomer), link-nya CUMA nampilin item-item itu.
+    - kalau belum punya satupun, tampil katalog umum (item tanpa Khusus_Customer)."""
+    k = str(row.get("Khusus_Customer", "") or "").strip()
+    if k and not _khusus_milik(row, nama_customer):
+        return False
+    punya = [r for r in (rows or []) if _khusus_milik(r, nama_customer)
+             or str(r.get("Item_Code", "")).strip().upper() in (khusus_harga or {})]
+    if punya:
+        return _khusus_milik(row, nama_customer) or str(row.get("Item_Code", "")).strip().upper() in (khusus_harga or {})
+    return True
 
 
 def _num(v):
@@ -104,7 +117,7 @@ def make_web_app(sheets_getter, on_order):
         items = []
         for r in rows:
             code = str(r.get("Item_Code", "")).strip()
-            if not code or not _boleh_lihat(r, nama_c):
+            if not code or not _boleh_lihat(r, nama_c, rows, khusus):
                 continue
             harga = khusus.get(code.upper(), _num(r.get("Harga_Jual")))
             if harga <= 0:
@@ -129,13 +142,14 @@ def make_web_app(sheets_getter, on_order):
             if not isinstance(req, list) or not req or len(req) > 80:
                 return web.json_response({"ok": False, "error": "Belum ada barang dipilih"}, status=400)
             pmap = await asyncio.to_thread(sheets.get_price_map)
+            semua = await asyncio.to_thread(sheets.get_price_list)
             khusus = await asyncio.to_thread(sheets.get_harga_customer, str(link.get("Nama_Customer", "")))
             items, total = [], 0.0
             for it in req:
                 code = str(it.get("code", "")).strip().upper()
                 qty = _num(it.get("qty"))
                 row = pmap.get(code)
-                if row is None or qty <= 0 or qty > 100000 or not _boleh_lihat(row, str(link.get("Nama_Customer", ""))):
+                if row is None or qty <= 0 or qty > 100000 or not _boleh_lihat(row, str(link.get("Nama_Customer", "")), semua, khusus):
                     continue
                 harga = khusus.get(code, _num(row.get("Harga_Jual")))
                 if harga <= 0:

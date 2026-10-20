@@ -118,7 +118,7 @@ Balikin HANYA JSON dengan struktur persis seperti ini, tanpa teks lain:
   "alamat": "alamat kalau disebut, kalau tidak ada string kosong",
   "metode": "Kirim" atau "Ambil" (tebak dari konteks, default \"Kirim\" kalau gak jelas),
   "items": [
-    {{"item_code": "KODE_DARI_KATALOG", "nama_item": "nama sesuai katalog", "qty": angka}}
+    {{"item_code": "KODE_DARI_KATALOG", "nama_item": "nama sesuai katalog", "qty": angka, "harga_satuan": angka atau null}}
   ],
   "ongkir": 0,
   "no_po_customer": "nomor PO/Purchase Order MILIK CUSTOMER kalau ada (misal kalau fotonya adalah dokumen resmi 'Purchase Order' dari customer dengan field 'Purchase Number'/'PO Number'/'No. PO', ambil nomornya persis), kalau gak ada string kosong",
@@ -133,6 +133,14 @@ Aturan penting:
   dari 1 kandidat, tetap masukin item itu dengan item_code kosong ("") dan
   nama_item = apa yang disebut customer, terus set perlu_konfirmasi_manual
   jadi true dan jelasin di "catatan".
+- harga_satuan: ISI HANYA kalau teks/foto menyebut jelas HARGA PER SATUAN
+  (per pcs/pack/kg) buat item itu -- misal kolom "Harga" di nota/invoice
+  atau chat "harga 900 ya". Ambil angka harga satuannya aja (bukan kolom
+  Jumlah/Subtotal/Total, bukan diskon). Kalau gak disebut, isi null (sistem
+  pakai harga katalog). JANGAN menebak.
+- Kalau foto-nya invoice/nota dengan kolom Produk + Deskripsi (misal
+  "PILLOW CAKE L" | "SABLON 1 SISI"), gabungin keduanya buat cocokin ke
+  katalog (Nama + Deskripsi).
 - Ongkir default 0 kecuali disebutin jelas nominalnya.
 - no_po_customer & tanggal_kirim itu OPSIONAL -- JANGAN mengarang, kosongin
   kalau memang gak disebut/gak keliatan di teks atau foto.

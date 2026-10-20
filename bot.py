@@ -110,6 +110,11 @@ def _order_preview_text(parsed):
         total += subtotal
         flag = "" if it.get("item_code") else " ⚠️ *(produk gak ketemu di katalog, cek lagi)*"
         lines.append(f"• {it.get('nama_item')} x{it.get('qty')} {it.get('satuan', '')} = {rupiah(subtotal)}{flag}")
+        if it.get("harga_katalog") is not None:
+            lines.append(
+                f"   ↳ harga {rupiah(harga)}/{it.get('satuan', '')} dari foto/chat "
+                f"(harga katalog {rupiah(it['harga_katalog'])})"
+            )
     ongkir = parsed.get("ongkir", 0) or 0
     lines.append("")
     lines.append(f"Subtotal: {rupiah(total)}")
@@ -198,10 +203,21 @@ def _resolve_po_items_with_catalog(parsed_items, sheets):
     return resolved
 
 
+def _harga_dari_dokumen(it):
+    """Harga per satuan yang kebaca jelas dari foto/chat (>0), atau None."""
+    try:
+        h = float(it.get("harga_satuan"))
+    except (TypeError, ValueError):
+        return None
+    return h if h > 0 else None
+
+
 def _resolve_items_with_price(parsed_items, sheets):
-    """Isi ulang item yang item_code-nya kosong dengan hasil find_product,
-    dan pastikan harga_satuan selalu ambil dari PriceList (bukan tebakan
-    AI) supaya harga selalu akurat."""
+    """Isi ulang item yang item_code-nya kosong dengan hasil find_product.
+    Harga default-nya dari PriceList (bukan tebakan AI). Pengecualian: kalau
+    foto/chat menyebut jelas harga per satuan (misal nota/invoice customer),
+    harga itu dipakai, dan harga katalog disimpan di 'harga_katalog' buat
+    ditampilin di preview kalau beda."""
     resolved = []
     for it in parsed_items:
         code = (it.get("item_code") or "").strip()
@@ -210,22 +226,30 @@ def _resolve_items_with_price(parsed_items, sheets):
             row = sheets.get_price_map().get(code.upper())
         if row is None:
             row = sheets.find_product(it.get("nama_item", ""))
+        harga_doc = _harga_dari_dokumen(it)
         if row is not None:
-            resolved.append({
+            harga_kat = row.get("Harga_Jual", 0)
+            item = {
                 "item_code": row["Item_Code"],
                 "nama_item": _item_label(row),
                 "kategori": row.get("Kategori", ""),
                 "satuan": row.get("Satuan", it.get("satuan", "")),
-                "harga_satuan": row.get("Harga_Jual", 0),
+                "harga_satuan": harga_doc if harga_doc is not None else harga_kat,
                 "qty": it.get("qty", 0),
-            })
+            }
+            try:
+                if harga_doc is not None and float(harga_kat or 0) != harga_doc:
+                    item["harga_katalog"] = harga_kat
+            except (TypeError, ValueError):
+                pass
+            resolved.append(item)
         else:
             resolved.append({
                 "item_code": "",
                 "nama_item": it.get("nama_item", "?"),
                 "kategori": "",
                 "satuan": it.get("satuan", ""),
-                "harga_satuan": 0,
+                "harga_satuan": harga_doc if harga_doc is not None else 0,
                 "qty": it.get("qty", 0),
             })
     return resolved

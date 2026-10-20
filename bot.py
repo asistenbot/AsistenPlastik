@@ -507,7 +507,7 @@ async def batallunas_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @owner_only
 async def lunas_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await _do_lunas(update, " ".join(context.args) if context.args else "")
+    await _ask_lunas(update, " ".join(context.args) if context.args else "")
 
 
 _DOC_LABEL = {"inv": "Invoice", "sj": "Surat Jalan", "both": "Invoice + Surat Jalan"}

@@ -57,6 +57,7 @@ SCHEMA = {
         "ID", "Jenis", "Ref", "Nama", "Jumlah", "Tanggal", "Status",
         "Terkirim_Tgl", "Dibuat", "Catatan",
     ],
+    config.SHEET_TOPIK: ["Kunci", "Chat_ID", "Thread_ID"],
     config.SHEET_TAGIHAN: [
         "Nama", "Tipe", "Hari_Kontra_Bon", "Tempo_Hari", "Alias",
     ],
@@ -1154,6 +1155,30 @@ class SheetsClient:
                     ws.batch_update(data)
                 return True
         return False
+
+    def get_topik_all(self):
+        """{kunci: (chat_id, thread_id|None)} dari tab TopikGrup."""
+        out = {}
+        for r in self._records(self._ws(config.SHEET_TOPIK)):
+            k = str(r.get("Kunci", "")).strip()
+            if not k:
+                continue
+            try:
+                chat = int(float(str(r.get("Chat_ID", "")).strip()))
+            except ValueError:
+                continue
+            t = str(r.get("Thread_ID", "")).strip()
+            out[k] = (chat, int(float(t)) if t else None)
+        return out
+
+    def set_topik(self, kunci, chat_id, thread_id):
+        ws = self._ws(config.SHEET_TOPIK)
+        values = ws.get_all_values()
+        for i, row in enumerate(values[1:], start=2):
+            if row and row[0] == kunci:
+                ws.batch_update([{"range": f"B{i}:C{i}", "values": [[str(chat_id), str(thread_id or "")]]}])
+                return
+        ws.append_row([kunci, str(chat_id), str(thread_id or "")], value_input_option="RAW")
 
     def close_reminders_for_ref(self, ref, status="Selesai"):
         """Tutup semua pengingat Aktif buat invoice/PO ini (lunas / dibatalin)."""

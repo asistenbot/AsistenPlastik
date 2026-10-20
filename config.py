@@ -130,3 +130,5 @@ SEED_TAGIHAN = [
     ("2 Saudara", "Supplier", "", 30, "2saudara,dua saudara"),
     ("Cave Sumber Berkat", "Supplier", "", 14, "CSB"),
 ]
+
+SHEET_TOPIK = "TopikGrup"

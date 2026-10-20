@@ -575,12 +575,85 @@ async def dokumen_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _lookup_dokumen(update, context, " ".join(context.args) if context.args else "", "both")
 
 
-async def _kirim_dotmatrix(update, judul, nama_dok, pages, txt, pdf):
+# ---------------- TOPIK GRUP ----------------
+TOPIK_LABEL = {
+    "order": "🛒 Order", "invoice": "🧾 Invoice", "suratjalan": "🚚 Surat Jalan",
+    "po": "📦 PO Supplier", "pengingat": "⏰ Pengingat", "error": "⚠️ Error",
+}
+_TOPIK_CACHE = {"data": None}
+
+
+def _topik_map(force=False):
+    if force or _TOPIK_CACHE["data"] is None:
+        try:
+            _TOPIK_CACHE["data"] = _sheets().get_topik_all()
+        except Exception:
+            logger.exception("gagal baca TopikGrup")
+            return _TOPIK_CACHE["data"] or {}
+    return _TOPIK_CACHE["data"]
+
+
+async def _mirror(bot, kunci, skip_chat=None, skip_thread=None, **kw):
+    """Salin kiriman ke topik grup yang udah didaftarin (kalau ada).
+    kw: text= | document=,filename=,caption= | photo=,caption=. Gagal = diabaikan."""
+    target = _topik_map().get(kunci)
+    if not target:
+        return
+    chat, thread = target
+    if skip_chat == chat and skip_thread == thread:
+        return
+    try:
+        extra = {"message_thread_id": thread} if thread else {}
+        doc = kw.get("document")
+        if doc is not None and hasattr(doc, "seek"):
+            doc.seek(0)
+        if "text" in kw:
+            await bot.send_message(chat_id=chat, text=kw["text"], reply_markup=kw.get("reply_markup"), **extra)
+        elif doc is not None:
+            await bot.send_document(chat_id=chat, document=doc, filename=kw.get("filename"),
+                                    caption=kw.get("caption"), **extra)
+        elif "photo" in kw:
+            await bot.send_photo(chat_id=chat, photo=kw["photo"], caption=kw.get("caption"), **extra)
+    except Exception:
+        logger.exception("gagal mirror ke topik %s", kunci)
+
+
+@owner_only
+async def topik_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.effective_message
+    arg = (context.args[0].lower() if context.args else "")
+    if arg in TOPIK_LABEL:
+        if update.effective_chat.type == "private":
+            await msg.reply_text("Command ini diketik DI DALAM topik grup yang mau didaftarin, bukan di chat pribadi.")
+            return
+        thread = msg.message_thread_id if getattr(msg, "is_topic_message", False) else None
+        _sheets().set_topik(arg, update.effective_chat.id, thread)
+        _topik_map(force=True)
+        await msg.reply_text(f"✅ Topik ini sekarang jadi tempat {TOPIK_LABEL[arg]}.")
+        return
+    data = _topik_map(force=True)
+    lines = ["Status topik grup:", ""]
+    for k, lab in TOPIK_LABEL.items():
+        lines.append(f"{'✅' if k in data else '❌'} {lab}  (daftar: /topik {k})")
+    lines += ["", "Cara daftar: buka topiknya di grup, ketik /topik <nama> (mis. /topik invoice)."]
+    await msg.reply_text("\n".join(lines))
+
+
+async def error_handler(update, context: ContextTypes.DEFAULT_TYPE):
+    logger.error("error di bot", exc_info=context.error)
+    err = f"⚠️ {type(context.error).__name__}: {str(context.error)[:300]}"
+    await _mirror(context.bot, "error", text=err)
+
+
+async def _kirim_dotmatrix(update, judul, nama_dok, pages, txt, pdf, kunci=None):
     """Cukup kirim 1 file PDF kertas 8,5 x 5,5 inch (siap print)."""
-    await update.effective_message.reply_document(
-        document=pdf, filename=f"{nama_dok}.pdf",
-        caption=f"{judul} — PDF ukuran kertas 8,5 x 5,5 inch, siap print",
-    )
+    cap = f"{judul} — PDF ukuran kertas 8,5 x 5,5 inch, siap print"
+    await update.effective_message.reply_document(document=pdf, filename=f"{nama_dok}.pdf", caption=cap)
+    if kunci:
+        m = update.effective_message
+        await _mirror(m.get_bot(), kunci, skip_chat=update.effective_chat.id,
+                      skip_thread=m.message_thread_id if getattr(m, "is_topic_message", False) else None,
+                      document=pdf, filename=f"{nama_dok}.pdf", caption=cap)
 
 
 async def _kirim_invoice(update, context, no_invoice):
@@ -604,7 +677,7 @@ async def _kirim_invoice(update, context, no_invoice):
         tanggal_kirim=first.get("Tanggal_Kirim", ""),
         tanggal=first.get("Timestamp", ""),
     )
-    await _kirim_dotmatrix(update, f"Invoice {no_invoice}", no_invoice, pages, txt, pdf)
+    await _kirim_dotmatrix(update, f"Invoice {no_invoice}", no_invoice, pages, txt, pdf, kunci="invoice")
 
 
 async def _kirim_surat_jalan(update, context, no_invoice):
@@ -623,7 +696,7 @@ async def _kirim_surat_jalan(update, context, no_invoice):
         tanggal_kirim=first.get("Tanggal_Kirim", ""),
         tanggal=first.get("Timestamp", ""),
     )
-    await _kirim_dotmatrix(update, f"Surat Jalan {no_sj}", no_sj, pages, txt, pdf)
+    await _kirim_dotmatrix(update, f"Surat Jalan {no_sj}", no_sj, pages, txt, pdf, kunci="suratjalan")
 
 
 # ---------------- KAS & LAPORAN ----------------
@@ -1377,6 +1450,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         context.user_data["last_invoice"] = no_invoice
         await query.edit_message_text(f"✅ Order disimpan sebagai *{no_invoice}*. Lagi bikin invoice & surat jalan...", parse_mode=ParseMode.MARKDOWN)
+        try:
+            rows = sheets.get_order_items(no_invoice)
+            tot = sum(float(r.get("Subtotal", 0) or 0) for r in rows) + float(rows[0].get("Ongkir", 0) or 0)
+            await _mirror(query.get_bot(), "order",
+                          text=f"🛒 Order baru {no_invoice}\n{rows[0].get('Nama_Customer','')} • {len(rows)} item • {rupiah(tot)}")
+        except Exception:
+            logger.exception("gagal mirror order")
         await _kirim_invoice(update, context, no_invoice)
         await _kirim_surat_jalan(update, context, no_invoice)
         return
@@ -1558,6 +1638,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_chat.send_document(
             document=pdf, filename=f"{no_po}.pdf", caption="Versi PDF (siap print A4)"
         )
+        await _mirror(query.get_bot(), "po", skip_chat=update.effective_chat.id, document=pdf,
+                      filename=f"{no_po}.pdf", caption=f"Purchase Order {no_po} — {parsed.get('nama_supplier','-')} ({rupiah(total)})")
         return
 
 
@@ -1829,6 +1911,7 @@ async def reminder_job(context: ContextTypes.DEFAULT_TYPE):
                 sent = True
             except Exception:
                 logger.exception("gagal kirim pengingat ke %s", chat_id)
+        await _mirror(context.bot, "pengingat", text=text, reply_markup=kb)
         if sent:
             try:
                 for r in batch:
@@ -2013,6 +2096,8 @@ def main():
     app.add_handler(CommandHandler("help", start))
     app.add_handler(CommandHandler("groupid", groupid_cmd))
     app.add_handler(CommandHandler("pricelist", pricelist_cmd))
+    app.add_handler(CommandHandler("topik", topik_cmd))
+    app.add_error_handler(error_handler)
     app.add_handler(CommandHandler("lunas", lunas_cmd))
     app.add_handler(CommandHandler("batallunas", batallunas_cmd))
     app.add_handler(CommandHandler("invoice", invoice_cmd))

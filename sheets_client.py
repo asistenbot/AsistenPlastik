@@ -61,7 +61,7 @@ SCHEMA = {
         "Terkirim_Tgl", "Dibuat", "Catatan",
     ],
     config.SHEET_TOPIK: ["Kunci", "Chat_ID", "Thread_ID"],
-    config.SHEET_LINKORDER: ["Token", "Nama_Customer", "Aktif", "Dibuat"],
+    config.SHEET_LINKORDER: ["Token", "Nama_Customer", "Aktif", "Dibuat", "Catatan"],
     config.SHEET_PESANANWEB: ["ID", "Waktu", "Nama", "Payload", "Status"],
     config.SHEET_TAGIHAN: [
         "Nama", "Tipe", "Hari_Kontra_Bon", "Tempo_Hari", "Alias",

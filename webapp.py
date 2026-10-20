@@ -32,10 +32,13 @@ input[type=date],input[type=text],textarea{width:100%;padding:10px;border:1px so
 .bar{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--ln);padding:10px 14px;display:flex;align-items:center;gap:12px}
 .bar .t{flex:1}.bar .t small{color:var(--mu);display:block;font-size:12px}.bar .t b{font-size:18px}
 .bar button{background:var(--g);color:#fff;border:0;border-radius:10px;padding:13px 20px;font-size:16px;font-weight:600}
-.bar button:disabled{opacity:.5}.ok{text-align:center;padding:40px 16px}.ok h2{font-size:22px;color:var(--g);text-transform:none}
+.bar button:disabled{opacity:.5}.note{background:#fff7d6;border:1px solid #ecd47a;color:#5b4a00;margin:12px;padding:10px 14px;border-radius:10px;font-weight:600;max-width:696px}
+@media(min-width:744px){.note{margin:12px auto}}
+.ok{text-align:center;padding:40px 16px}.ok h2{font-size:22px;color:var(--g);text-transform:none}
 .wa{display:inline-block;margin-top:14px;background:#25d366;color:#fff;text-decoration:none;padding:14px 22px;border-radius:10px;font-weight:600}
 </style></head><body>
 <header><h1>Order ke __BIZ__</h1><p>Halo, <b>__NAMA__</b> — pilih barang & jumlahnya, lalu kirim.</p></header>
+__NOTE__
 <main id="m"></main>
 <div class="bar" id="bar"><div class="t"><small id="cnt">0 item</small><b id="tot">Rp0</b></div><button id="go" disabled>Kirim Order</button></div>
 <script>
@@ -69,6 +72,24 @@ def _item_label(row):
     if desk and desk.upper() != "POLOS" and desk.lower() not in nama.lower():
         return f"{nama} - {desk}"
     return nama
+
+
+# catatan bawaan di halaman order (bisa ditimpa lewat kolom Catatan di tab LinkOrder)
+CATATAN_BAWAAN = {
+    "grandia": "1 pak isi 25 lembar",
+    "shuguoyinxiang": "1 pak isi 25 lembar",
+}
+
+
+def _catatan(link):
+    c = str(link.get("Catatan", "") or "").strip()
+    if c:
+        return c
+    n = "".join(str(link.get("Nama_Customer", "")).lower().split())
+    for k, v in CATATAN_BAWAAN.items():
+        if k in n:
+            return v
+    return ""
 
 
 def _khusus_milik(row, nama_customer):
@@ -126,6 +147,7 @@ def make_web_app(sheets_getter, on_order):
                           "satuan": r.get("Satuan", ""), "harga": harga})
         data = json.dumps({"items": items}).replace("</", "<\\/")
         page = (PAGE.replace("__DATA__", data)
+                    .replace("__NOTE__", ('<div class="note">ℹ️ ' + html.escape(_catatan(link)) + '</div>') if _catatan(link) else "")
                     .replace("__NAMA__", html.escape(str(link.get("Nama_Customer", ""))))
                     .replace("__BIZ__", html.escape(config.BUSINESS_NAME)))
         return web.Response(text=page, content_type="text/html", charset="utf-8")

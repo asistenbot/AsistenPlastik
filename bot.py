@@ -288,6 +288,12 @@ otomatis dicetak ulang. Default-nya ngedit order yang PALING BARU; kalau
 mau invoice lain, sebutin nomor invoice-nya, misal "invoice
 INV-20260828-001 no HP-nya ganti 08123456789".
 
+*Pengingat otomatis:* tiap invoice terbit, bot ngingetin jam 08.00 buat
+kontra bon (sesuai hari kontra bon customer) lalu cek pembayaran 14 hari
+kemudian; tiap PO dibuka, bot ngingetin bayar supplier sesuai tempo. Tinggal
+pencet tombol Sudah / Belum. Lihat jadwalnya: /pengingat. Hari kontra bon &
+tempo diatur di tab PengaturanTagihan (Google Sheets).
+
 *Order-nya gak jadi / mau dihapus total?* Bilang aja "hapus order Grandia
 Hotel" atau "batalin invoice INV-20260828-001" -- bot nanya konfirmasi
 dulu, begitu di-OK order ditandai Batal (datanya tetep ada buat histori,
@@ -309,6 +315,7 @@ Command di bawah ini cadangan aja kalau mau lebih pasti/cepat:
 /dokumen <no invoice atau nama customer> — cetak ulang invoice + surat jalan
 (kalau customer punya banyak invoice, bot kasih daftar buat dipilih)
 /lunas <no invoice atau nama customer> — tandai order sudah dibayar
+/pengingat — lihat jadwal pengingat (kontra bon, tagihan, bayar supplier)
 /piutang — rekap tagihan customer yang belum lunas
 
 /po — bikin Purchase Order (belanja) ke supplier
@@ -1254,6 +1261,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _kirim_dokumen(update, context, no_invoice, kind)
         return
 
+    if data.startswith("rm:"):
+        await _handle_reminder_callback(update, context, data)
+        return
+
     if data == "order_cancel":
         context.user_data.pop("pending_order", None)
         await query.edit_message_text("Order dibatalin.")
@@ -1650,6 +1661,181 @@ async def _try_correct_pending_order(update, context, pending, text):
 
 # ---------------- MAIN ----------------
 
+# ---------------- PENGINGAT (kontra bon / tagihan / bayar supplier) ----------------
+
+def _wib_now():
+    import datetime
+    return datetime.datetime.utcnow() + datetime.timedelta(hours=7)
+
+
+_REM_LABEL = {
+    "kontra_bon": "📋 KONTRA BON",
+    "bayar_customer": "💰 CEK PEMBAYARAN CUSTOMER",
+    "bayar_supplier": "💸 WAKTUNYA BAYAR SUPPLIER",
+}
+
+
+def _reminder_message(rem):
+    """Teks + tombol pengingat. Teks polos (tanpa Markdown) biar nama yang
+    ada simbolnya gak bikin error."""
+    import sheets_client as sc
+    jenis, rid = rem.get("Jenis", ""), rem.get("ID", "")
+    nama, ref = rem.get("Nama", ""), rem.get("Ref", "")
+    jumlah = rem.get("Jumlah", 0)
+    tgl = str(rem.get("Tanggal", ""))
+    try:
+        jadwal = f"{sc.hari_dari_tanggal(tgl)}, {sc.tgl_dmy(tgl)}"
+    except ValueError:
+        jadwal = tgl
+    if jenis == "kontra_bon":
+        text = (f"{_REM_LABEL[jenis]}\n\nCustomer: {nama}\nInvoice: {ref} • {rupiah(jumlah)}\n"
+                f"Jadwal kontra bon: {jadwal}\n\nUdah di-kontra bon belum?")
+        kb = [[InlineKeyboardButton("✅ Sudah kontra bon", callback_data=f"rm:{rid}:kbok"),
+               InlineKeyboardButton("⏳ Belum", callback_data=f"rm:{rid}:kbno")]]
+    elif jenis == "bayar_customer":
+        text = (f"{_REM_LABEL[jenis]}\n\nCustomer: {nama}\nInvoice: {ref} • {rupiah(jumlah)}\n"
+                f"Jadwal cek: {jadwal}\n\nUdah bayar belum?")
+        kb = [[InlineKeyboardButton("✅ Sudah bayar (Lunas)", callback_data=f"rm:{rid}:payok"),
+               InlineKeyboardButton("⏳ Belum", callback_data=f"rm:{rid}:payno")]]
+    else:
+        text = (f"{_REM_LABEL['bayar_supplier']}\n\nSupplier: {nama}\nPO: {ref} • {rupiah(jumlah)}\n"
+                f"Jatuh tempo: {jadwal}\n\nUdah dibayar belum?")
+        kb = [[InlineKeyboardButton("✅ Sudah dibayar", callback_data=f"rm:{rid}:supok"),
+               InlineKeyboardButton("⏳ Belum", callback_data=f"rm:{rid}:supno")]]
+    return text, InlineKeyboardMarkup(kb)
+
+
+async def reminder_job(context: ContextTypes.DEFAULT_TYPE):
+    """Dipanggil tiap 10 menit. Kirim pengingat yang udah jatuh tempo, sekali
+    per hari per pengingat, mulai jam REMINDER_HOUR WIB. Datanya disimpen di
+    tab Pengingat (Google Sheets), jadi aman walau bot direstart."""
+    now = _wib_now()
+    if now.hour < config.REMINDER_HOUR:
+        return
+    today = now.strftime("%Y-%m-%d")
+    try:
+        sheets = _sheets()
+        due = sheets.get_due_reminders(today)
+    except Exception:
+        logger.exception("gagal baca pengingat")
+        return
+    chat_ids = [c for c in config.OWNER_TELEGRAM_IDS if c]
+    for rem in due:
+        text, kb = _reminder_message(rem)
+        sent = False
+        for chat_id in chat_ids:
+            try:
+                await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=kb)
+                sent = True
+            except Exception:
+                logger.exception("gagal kirim pengingat ke %s", chat_id)
+        if sent:
+            try:
+                sheets.update_reminder(rem["ID"], Terkirim_Tgl=today)
+            except Exception:
+                logger.exception("gagal nandain pengingat terkirim")
+
+
+async def _handle_reminder_callback(update, context, data):
+    import datetime
+    import sheets_client as sc
+    query = update.callback_query
+    try:
+        _, rid, act = data.split(":", 2)
+    except ValueError:
+        return
+    sheets = _sheets()
+    rem = sheets.get_reminder(rid)
+    if not rem or str(rem.get("Status", "")) != "Aktif":
+        await query.edit_message_text("Pengingat ini udah ditangani / udah gak aktif.")
+        return
+    nama, ref, jumlah = rem.get("Nama", ""), rem.get("Ref", ""), rem.get("Jumlah", 0)
+    today = _wib_now().date()
+    besok = today + datetime.timedelta(days=1)
+
+    if act in ("kbno", "payno", "supno"):
+        sheets.update_reminder(rid, Tanggal=besok)
+        await query.edit_message_text(f"⏳ Oke. {nama} ({ref}) gua ingetin lagi besok jam {config.REMINDER_HOUR:02d}.00.")
+        return
+
+    if act == "kbok":
+        sheets.update_reminder(rid, Status="Selesai")
+        tempo = sheets.get_tempo(nama, "customer")
+        due = today + datetime.timedelta(days=tempo)
+        sheets.add_reminder("bayar_customer", ref, nama, jumlah, due, "Cek pembayaran setelah kontra bon")
+        await query.edit_message_text(
+            f"✅ Kontra bon {nama} ({ref}) tercatat.\n"
+            f"Gua ingetin cek pembayaran {tempo} hari lagi: {sc.hari_dari_tanggal(due)}, {sc.tgl_dmy(due)}."
+        )
+        return
+
+    if act == "payok":
+        rows = sheets.get_order_items(ref)
+        status = str(rows[0].get("Status", "")) if rows else ""
+        if not rows or status in ("Lunas", "Batal"):
+            sheets.close_reminders_for_ref(ref, "Selesai" if status == "Lunas" else "Batal")
+            await query.edit_message_text(f"{ref} udah {status or 'gak ketemu'}, pengingatnya ditutup.")
+            return
+        total = sheets.mark_order_lunas(ref)
+        sheets.add_kas_entry("Masuk", "Penjualan", total, keterangan=f"Pelunasan {ref}", ref=ref)
+        await query.edit_message_text(f"✅ {ref} ({nama}) ditandai Lunas {rupiah(total)}, udah dicatat ke Kas Masuk.")
+        return
+
+    if act == "supok":
+        rows = sheets.get_po_items(ref)
+        status = str(rows[0].get("Status", "")) if rows else ""
+        if not rows or status in ("Lunas", "Batal"):
+            sheets.close_reminders_for_ref(ref, "Selesai" if status == "Lunas" else "Batal")
+            await query.edit_message_text(f"{ref} udah {status or 'gak ketemu'}, pengingatnya ditutup.")
+            return
+        total = sum(float(r.get("Subtotal", 0) or 0) for r in rows)
+        sisa = sheets.bayar_utang(nama, total, f"Pelunasan {ref}")
+        sheets.add_kas_entry("Keluar", "Bayar Supplier", total, keterangan=f"Bayar utang {nama} {ref}", ref=ref)
+        sheets.mark_po_lunas(ref)
+        sisa_text = rupiah(sisa) if sisa > 0 else "Rp0"
+        await query.edit_message_text(
+            f"✅ {ref} ke {nama} ({rupiah(total)}) ditandai lunas, udah dicatat ke Kas Keluar.\n"
+            f"Sisa utang ke {nama}: {sisa_text}"
+        )
+        return
+
+
+@owner_only
+async def pengingat_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/pengingat = daftar pengingat yang aktif. /pengingat sync = bikinin
+    pengingat buat invoice/PO lama yang belum lunas tapi belum punya."""
+    import sheets_client as sc
+    sheets = _sheets()
+    if context.args and context.args[0].lower() == "sync":
+        n_inv, n_po = sheets.backfill_reminders()
+        await update.effective_message.reply_text(
+            f"✅ Selesai: {n_inv} pengingat invoice & {n_po} pengingat PO baru dibuat "
+            f"(buat yang belum lunas & belum punya pengingat)."
+        )
+        return
+    rems = sheets.get_active_reminders()
+    if not rems:
+        await update.effective_message.reply_text(
+            "Belum ada pengingat aktif. Pengingat otomatis dibuat tiap invoice/PO baru.\n"
+            "Mau bikinin buat invoice & PO lama yang belum lunas? Ketik: /pengingat sync"
+        )
+        return
+    label = {"kontra_bon": "Kontra bon", "bayar_customer": "Cek bayar", "bayar_supplier": "Bayar supplier"}
+    lines = [f"*Pengingat aktif ({len(rems)}):*", ""]
+    for r in rems[:30]:
+        tgl = str(r.get("Tanggal", ""))
+        try:
+            when = f"{sc.hari_dari_tanggal(tgl)[:3]} {sc.tgl_dmy(tgl)}"
+        except ValueError:
+            when = tgl
+        lines.append(f"• {when} — {label.get(r.get('Jenis'), r.get('Jenis'))}: {r.get('Nama')} ({r.get('Ref')}) {rupiah(r.get('Jumlah', 0))}")
+    if len(rems) > 30:
+        lines.append(f"... dan {len(rems) - 30} lainnya")
+    lines.append("")
+    lines.append(f"Pengingat dikirim tiap hari jam {config.REMINDER_HOUR:02d}.00 WIB. Hari kontra bon & tempo bayar bisa diedit di tab PengaturanTagihan (Google Sheets).")
+    await _send_text(update, "\n".join(lines))
+
+
 async def on_startup(app: Application):
     # panggil sekali biar SheetsClient nyiapin skema tab kalau belum ada
     _sheets()
@@ -1677,10 +1863,16 @@ def main():
     app.add_handler(CommandHandler("kas", kas_cmd))
     app.add_handler(CommandHandler("laporanbulanan", laporanbulanan_cmd))
     app.add_handler(CommandHandler("batal", batal_cmd))
+    app.add_handler(CommandHandler("pengingat", pengingat_cmd))
 
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+
+    if app.job_queue is None:
+        logger.error("JobQueue gak aktif -- pengingat gak jalan. Pastikan requirements pakai python-telegram-bot[job-queue].")
+    else:
+        app.job_queue.run_repeating(reminder_job, interval=600, first=45)
 
     logger.info("Starting polling...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)

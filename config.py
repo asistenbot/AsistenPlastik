@@ -35,6 +35,8 @@ SHEET_SUPPLIERS = "Suppliers"
 SHEET_PURCHASE_ORDERS = "PurchaseOrders"
 SHEET_UTANG_SUPPLIER = "UtangSupplier"
 SHEET_KAS = "Kas"
+SHEET_PENGINGAT = "Pengingat"
+SHEET_TAGIHAN = "PengaturanTagihan"
 
 # ==== TIMEZONE ====
 TIMEZONE = "Asia/Jakarta"
@@ -109,3 +111,22 @@ PO_PREFIX = "PO"
 
 # ==== KATEGORI KAS (buat /kas manual & laporan bulanan) ====
 KAS_KELUAR_KATEGORI = ["Bayar Supplier", "Operasional", "Gaji", "Lainnya"]
+
+# ==== PENGINGAT (kontra bon, tagihan customer, bayar supplier) ====
+# Jam kirim pengingat (WIB). Bot ngecek tiap 10 menit, kirim sekali per hari
+# per pengingat begitu lewat jam ini.
+REMINDER_HOUR = 8
+# Tempo bayar default kalau customer/supplier gak ada di tab PengaturanTagihan
+DEFAULT_TEMPO_CUSTOMER = 14
+DEFAULT_TEMPO_SUPPLIER = 14
+# Isi awal tab PengaturanTagihan (dibuat otomatis kalau tab-nya masih kosong).
+# Selanjutnya TINGGAL EDIT DI GOOGLE SHEETS, gak perlu ubah kode:
+# (Nama, Tipe, Hari_Kontra_Bon, Tempo_Hari, Alias dipisah koma)
+SEED_TAGIHAN = [
+    ("Grandia", "Customer", "Kamis", 14, ""),
+    ("Baso Yen", "Customer", "Selasa", 14, ""),
+    ("Pillow Cake", "Customer", "Selasa", 14, ""),
+    ("Shu Guo Yin Xiang", "Customer", "Selasa", 14, ""),
+    ("2 Saudara", "Supplier", "", 30, "2saudara,dua saudara"),
+    ("Cave Sumber Berkat", "Supplier", "", 14, "CSB"),
+]

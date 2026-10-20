@@ -12,12 +12,16 @@ Jadi Riky cuma perlu bikin 1 spreadsheet KOSONG & share ke service account
 
 import datetime
 import json
+import logging
 import threading
+import uuid
 
 import gspread
 from google.oauth2.service_account import Credentials
 
 import config
+
+logger = logging.getLogger(__name__)
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -49,12 +53,62 @@ SCHEMA = {
     config.SHEET_KAS: [
         "Tanggal", "Jenis", "Kategori", "Jumlah", "Keterangan", "Ref",
     ],
+    config.SHEET_PENGINGAT: [
+        "ID", "Jenis", "Ref", "Nama", "Jumlah", "Tanggal", "Status",
+        "Terkirim_Tgl", "Dibuat", "Catatan",
+    ],
+    config.SHEET_TAGIHAN: [
+        "Nama", "Tipe", "Hari_Kontra_Bon", "Tempo_Hari", "Alias",
+    ],
 }
 
 
 def _today_str():
     now = datetime.datetime.utcnow() + datetime.timedelta(hours=7)  # WIB
     return now.strftime("%Y-%m-%d")
+
+
+HARI_ID = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
+
+
+def _today_date():
+    return datetime.datetime.strptime(_today_str(), "%Y-%m-%d").date()
+
+
+def _norm(s):
+    return "".join(ch for ch in str(s or "").lower() if ch.isalnum())
+
+
+def hari_index(nama_hari):
+    """'Selasa' -> 1 (Senin=0); None kalau bukan nama hari."""
+    n = str(nama_hari or "").strip().lower().replace("'", "").replace("’", "")
+    alias = {"senin": 0, "selasa": 1, "rabu": 2, "kamis": 3, "jumat": 4,
+             "sabtu": 5, "minggu": 6, "ahad": 6}
+    return alias.get(n)
+
+
+def next_weekday(after_date, weekday_idx):
+    """Tanggal hari `weekday_idx` berikutnya, PALING CEPAT besok (bukan hari ini)."""
+    d = after_date + datetime.timedelta(days=1)
+    while d.weekday() != weekday_idx:
+        d += datetime.timedelta(days=1)
+    return d
+
+
+def tgl_dmy(date_or_str):
+    """date / '2026-10-27' -> '27-10-2026'."""
+    if isinstance(date_or_str, str):
+        try:
+            date_or_str = datetime.datetime.strptime(date_or_str[:10], "%Y-%m-%d").date()
+        except ValueError:
+            return str(date_or_str)
+    return date_or_str.strftime("%d-%m-%Y")
+
+
+def hari_dari_tanggal(date_or_str):
+    if isinstance(date_or_str, str):
+        date_or_str = datetime.datetime.strptime(date_or_str[:10], "%Y-%m-%d").date()
+    return HARI_ID[date_or_str.weekday()]
 
 
 def _now_str():
@@ -109,6 +163,7 @@ class SheetsClient:
 
         self._seed_pricelist_if_empty()
         self._seed_customers_if_empty()
+        self._seed_tagihan_if_empty()
         self._ensure_batal_red_formatting(config.SHEET_ORDERS)
         self._ensure_batal_red_formatting(config.SHEET_PURCHASE_ORDERS)
 
@@ -203,6 +258,14 @@ class SheetsClient:
         rows = ws.get_all_values()
         if len(rows) <= 1:
             data = [[nama, "", ""] for nama in config.SEED_CUSTOMERS]
+            if data:
+                ws.append_rows(data, value_input_option="RAW")
+
+    def _seed_tagihan_if_empty(self):
+        ws = self.sh.worksheet(config.SHEET_TAGIHAN)
+        rows = ws.get_all_values()
+        if len(rows) <= 1:
+            data = [list(r) for r in config.SEED_TAGIHAN]
             if data:
                 ws.append_rows(data, value_input_option="RAW")
 
@@ -510,6 +573,11 @@ class SheetsClient:
                 ])
             ws.append_rows(rows, value_input_option="RAW")
             self.add_customer_if_new(nama_customer, no_hp, alamat)
+        try:
+            total = sum(float(it["qty"]) * float(it["harga_satuan"]) for it in items) + float(ongkir or 0)
+            self.create_invoice_reminders(no_invoice, nama_customer, total, tgl)
+        except Exception:
+            logger.exception("gagal bikin pengingat invoice %s", no_invoice)
         return no_invoice
 
     def get_order_items(self, no_invoice):
@@ -597,6 +665,7 @@ class SheetsClient:
             return None
         for r, c, v in updates:
             ws.update_cell(r, c, v)
+        self._safe_close_reminders(no_invoice, "Selesai")
         return total
 
     def edit_order_header(self, no_invoice, updates):
@@ -757,6 +826,8 @@ class SheetsClient:
                 continue
             found = True
             ws.update_cell(idx, col_status, "Batal")
+        if found:
+            self._safe_close_reminders(no_invoice, "Batal")
         return found
 
     def get_pending_orders(self):
@@ -823,6 +894,10 @@ class SheetsClient:
             ws.append_rows(rows, value_input_option="RAW")
             self.add_supplier_if_new(nama_supplier)
             self._add_utang_entry(nama_supplier, no_po, "Utang Baru", total, "PO baru")
+        try:
+            self.create_po_reminder(no_po, nama_supplier, total)
+        except Exception:
+            logger.exception("gagal bikin pengingat PO %s", no_po)
         return no_po, total
 
     def get_po_items(self, no_po):
@@ -886,6 +961,8 @@ class SheetsClient:
         if found and total:
             with self._lock:
                 self._add_utang_entry(nama_supplier, no_po, "Batal PO", total, "PO dibatalin, utang dibalikin")
+        if found:
+            self._safe_close_reminders(no_po, "Batal")
         return found, nama_supplier, total
 
     def mark_po_lunas(self, no_po):
@@ -901,6 +978,8 @@ class SheetsClient:
                 found = True
                 ws.update_cell(idx, col_status, "Lunas")
                 ws.update_cell(idx, col_tgl, _today_str())
+        if found:
+            self._safe_close_reminders(no_po, "Selesai")
         return found
 
     # ---------------- UTANG SUPPLIER ----------------
@@ -948,6 +1027,166 @@ class SheetsClient:
             if round(saldo) != 0:
                 out[nama] = saldo
         return out
+
+    # ---------------- PENGINGAT ----------------
+
+    def get_tagihan_setting(self, nama, tipe):
+        """Baris PengaturanTagihan buat customer/supplier ini (cocok persis
+        nama/alias dulu, lalu cocok sebagian), atau None."""
+        n = _norm(nama)
+        if not n:
+            return None
+        rows = [r for r in self._records(self._ws(config.SHEET_TAGIHAN))
+                if str(r.get("Tipe", "")).strip().lower() == tipe.lower()]
+
+        def keys(r):
+            ks = [_norm(r.get("Nama", ""))] + [_norm(a) for a in str(r.get("Alias", "")).split(",")]
+            return [k for k in ks if k]
+
+        for r in rows:
+            if n in keys(r):
+                return r
+        for r in rows:
+            for k in keys(r):
+                if len(k) >= 4 and (k in n or (len(n) >= 4 and n in k)):
+                    return r
+        return None
+
+    def get_tempo(self, nama, tipe):
+        st = self.get_tagihan_setting(nama, tipe)
+        default = config.DEFAULT_TEMPO_CUSTOMER if tipe.lower() == "customer" else config.DEFAULT_TEMPO_SUPPLIER
+        try:
+            v = int(float((st or {}).get("Tempo_Hari") or default))
+            return v if v > 0 else default
+        except (TypeError, ValueError):
+            return default
+
+    def add_reminder(self, jenis, ref, nama, jumlah, tanggal, catatan=""):
+        """jenis: kontra_bon | bayar_customer | bayar_supplier. tanggal: date/str."""
+        rid = "R" + uuid.uuid4().hex[:7]
+        tgl = tanggal.strftime("%Y-%m-%d") if hasattr(tanggal, "strftime") else str(tanggal)[:10]
+        self._ws(config.SHEET_PENGINGAT).append_row(
+            [rid, jenis, ref, nama, jumlah, tgl, "Aktif", "", _now_str(), catatan],
+            value_input_option="RAW",
+        )
+        return rid
+
+    def _reminder_records(self):
+        return self._records(self._ws(config.SHEET_PENGINGAT))
+
+    def get_reminder(self, rid):
+        for r in self._reminder_records():
+            if str(r.get("ID", "")) == rid:
+                return r
+        return None
+
+    def get_active_reminders(self):
+        out = [r for r in self._reminder_records() if str(r.get("Status", "")) == "Aktif"]
+        return sorted(out, key=lambda r: (str(r.get("Tanggal", "")), str(r.get("Ref", ""))))
+
+    def get_due_reminders(self, today_str):
+        """Pengingat Aktif yang tanggalnya udah tiba/lewat dan belum dikirim hari ini."""
+        return [r for r in self.get_active_reminders()
+                if str(r.get("Tanggal", "")) <= today_str and str(r.get("Terkirim_Tgl", "")) != today_str]
+
+    def update_reminder(self, rid, **fields):
+        """fields: Status / Tanggal / Terkirim_Tgl / Catatan."""
+        from gspread.utils import rowcol_to_a1
+        ws = self._ws(config.SHEET_PENGINGAT)
+        values = ws.get_all_values()
+        if not values:
+            return False
+        headers = values[0]
+        for i, row in enumerate(values[1:], start=2):
+            if row and row[0] == rid:
+                data = []
+                for k, v in fields.items():
+                    if k in headers:
+                        v = v.strftime("%Y-%m-%d") if hasattr(v, "strftime") else v
+                        data.append({"range": rowcol_to_a1(i, headers.index(k) + 1), "values": [[v]]})
+                if data:
+                    ws.batch_update(data)
+                return True
+        return False
+
+    def close_reminders_for_ref(self, ref, status="Selesai"):
+        """Tutup semua pengingat Aktif buat invoice/PO ini (lunas / dibatalin)."""
+        from gspread.utils import rowcol_to_a1
+        ws = self._ws(config.SHEET_PENGINGAT)
+        values = ws.get_all_values()
+        if not values:
+            return 0
+        headers = values[0]
+        c_ref, c_status = headers.index("Ref"), headers.index("Status")
+        data = []
+        for i, row in enumerate(values[1:], start=2):
+            if len(row) > max(c_ref, c_status) and row[c_ref] == ref and row[c_status] == "Aktif":
+                data.append({"range": rowcol_to_a1(i, c_status + 1), "values": [[status]]})
+        if data:
+            ws.batch_update(data)
+        return len(data)
+
+    def _safe_close_reminders(self, ref, status):
+        try:
+            self.close_reminders_for_ref(ref, status)
+        except Exception:
+            logger.exception("gagal nutup pengingat %s", ref)
+
+    def create_invoice_reminders(self, no_invoice, nama, total, base_date=None):
+        """Dipanggil tiap invoice terbit. Customer yang punya hari kontra bon:
+        ingetin di hari itu (08.00). Selain itu: ingetin cek pembayaran
+        setelah tempo (default 14 hari) dari tanggal invoice."""
+        today = _today_date()
+        try:
+            base = datetime.datetime.strptime(str(base_date)[:10], "%Y-%m-%d").date() if base_date else today
+        except ValueError:
+            base = today
+        st = self.get_tagihan_setting(nama, "customer")
+        idx = hari_index((st or {}).get("Hari_Kontra_Bon"))
+        if idx is not None:
+            due = next_weekday(today, idx)
+            return self.add_reminder("kontra_bon", no_invoice, nama, total, due,
+                                     f"Kontra bon hari {HARI_ID[idx]}")
+        tempo = self.get_tempo(nama, "customer")
+        due = max(base + datetime.timedelta(days=tempo), today + datetime.timedelta(days=1))
+        return self.add_reminder("bayar_customer", no_invoice, nama, total, due, f"Tempo {tempo} hari")
+
+    def create_po_reminder(self, no_po, nama_supplier, total, base_date=None):
+        tempo = self.get_tempo(nama_supplier, "supplier")
+        today = _today_date()
+        try:
+            base = datetime.datetime.strptime(str(base_date)[:10], "%Y-%m-%d").date() if base_date else today
+        except ValueError:
+            base = today
+        due = max(base + datetime.timedelta(days=tempo), today + datetime.timedelta(days=1))
+        return self.add_reminder("bayar_supplier", no_po, nama_supplier, total, due, f"Tempo {tempo} hari")
+
+    def backfill_reminders(self):
+        """Bikinin pengingat buat invoice Pending & PO Belum Lunas yang belum
+        punya pengingat sama sekali. Balikin (jumlah_invoice, jumlah_po)."""
+        have = {str(r.get("Ref", "")) for r in self._reminder_records()}
+        n_inv = n_po = 0
+        seen = set()
+        for r in self.get_pending_orders():
+            inv = str(r.get("No_Invoice", ""))
+            if inv in have or inv in seen:
+                continue
+            seen.add(inv)
+            rows = self.get_order_items(inv)
+            total = sum(float(x.get("Subtotal", 0) or 0) for x in rows)
+            total += float(rows[0].get("Ongkir", 0) or 0)
+            self.create_invoice_reminders(inv, r.get("Nama_Customer", ""), total, str(r.get("Timestamp", ""))[:10])
+            n_inv += 1
+        seen = set()
+        for r in self.get_all_pos():
+            po = str(r.get("No_PO", ""))
+            if po in have or po in seen or str(r.get("Status", "")) != "Belum Lunas":
+                continue
+            seen.add(po)
+            total = sum(float(x.get("Subtotal", 0) or 0) for x in self.get_po_items(po))
+            self.create_po_reminder(po, r.get("Nama_Supplier", ""), total, str(r.get("Timestamp", ""))[:10])
+            n_po += 1
+        return n_inv, n_po
 
     # ---------------- KAS ----------------
 

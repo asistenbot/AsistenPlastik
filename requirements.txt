@@ -1,4 +1,4 @@
-python-telegram-bot>=21.6,<22
+python-telegram-bot[job-queue]>=21.6,<22
 gspread>=6.1.2,<7
 google-auth>=2.34.0,<3
 anthropic>=0.34.0,<1

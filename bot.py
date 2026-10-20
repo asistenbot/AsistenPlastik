@@ -975,8 +975,9 @@ async def _do_edit_order(update, context, target, text):
     if target and target.upper().startswith(config.INVOICE_PREFIX):
         no_invoice = target
     elif target:
-        no_invoice = await _pilih_invoice(update, target, "cpick", "Pilih yang mau dibatalin:")
+        no_invoice = await _pilih_invoice(update, target, "epick", "Pilih yang mau diedit:")
         if not no_invoice:
+            context.user_data["edit_text"] = text
             return
     if not no_invoice:
         no_invoice = context.user_data.get("last_invoice")
@@ -1194,10 +1195,12 @@ async def _do_cancel_order(update, context, target):
     no_invoice = None
     if target and target.upper().startswith(config.INVOICE_PREFIX):
         no_invoice = target
+    elif target:
+        no_invoice = await _pilih_invoice(update, target, "cpick", "Pilih yang mau dibatalin:")
+        if not no_invoice:
+            return
     if not no_invoice:
         no_invoice = context.user_data.get("last_invoice")
-    if not no_invoice and target:
-        no_invoice = sheets.get_latest_invoice_for_customer(target)
     if not no_invoice:
         await update.effective_message.reply_text(
             "Order/invoice yang mana yang mau dibatalin? Sebutin nomor invoice-nya "
@@ -1501,10 +1504,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _kirim_dokumen(update, context, no_invoice, kind)
         return
 
-    if data.startswith(("cpick:", "cpopick:", "lpick:")):
+    if data.startswith(("cpick:", "cpopick:", "lpick:", "epick:")):
         kind, val = data.split(":", 1)
         await query.edit_message_text(f"Oke, {val} dipilih.")
-        if kind == "cpick":
+        if kind == "epick":
+            await _do_edit_order(update, context, val, context.user_data.pop("edit_text", ""))
+        elif kind == "cpick":
             await _do_cancel_order(update, context, val)
         elif kind == "cpopick":
             await _do_cancel_po(update, context, val)

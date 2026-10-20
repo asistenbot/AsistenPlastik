@@ -149,10 +149,30 @@ class _Canvas:
 
 # ---------------------------------------------------------------- bagian2
 
+_LOGO_CACHE = {}
+
+
+def _logo():
+    if "img" not in _LOGO_CACHE:
+        try:
+            _LOGO_CACHE["img"] = Image.open(os.path.join(BASE_DIR, "logo_doc.png")).convert("RGB")
+        except Exception:
+            _LOGO_CACHE["img"] = None
+    return _LOGO_CACHE["img"]
+
+
 def _header(cv, doc_title, doc_number, tanggal):
     cv.rect(0, 0, WIDTH, 12, fill=ACCENT)
-    cv.text(MARGIN, 66, doc_title, "bold", 38, ACCENT)
-    cv.rect(MARGIN, 98, MARGIN + 64, 102, fill=ACCENT)
+    logo = _logo()
+    title_x = MARGIN
+    if logo is not None:
+        lh = 92
+        lw = int(round(logo.width * lh / logo.height))
+        cv.img.paste(logo.resize((lw * SCALE, lh * SCALE), Image.LANCZOS), (MARGIN * SCALE, 30 * SCALE))
+        title_x = MARGIN + lw + 28
+        cv.line(title_x - 14, 38, title_x - 14, 118, LINE_STRONG, 1.5)
+    cv.text(title_x, 66, doc_title, "bold", 34 if logo is not None else 38, ACCENT)
+    cv.rect(title_x, 98, title_x + 64, 102, fill=ACCENT)
     right = WIDTH - MARGIN
     cv.text(right, 48, "NO. DOKUMEN", "bold", 11.5, MUTED, "r")
     cv.text(right, 70, doc_number, "bold", 20, INK, "r")

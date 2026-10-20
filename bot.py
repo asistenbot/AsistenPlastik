@@ -1541,6 +1541,29 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Order dibatalin.")
         return
 
+    if data.startswith("wo_no:"):
+        pid = data.split(":", 1)[1]
+        sheets = _sheets()
+        row = sheets.get_pesanan_web(pid)
+        if not row or str(row.get("Status", "")) != "Menunggu":
+            await query.edit_message_text(f"Order online {pid} udah diproses sebelumnya.")
+            return
+        sheets.set_pesanan_web_status(pid, "Ditolak")
+        await query.edit_message_text(f"❌ Order online {pid} ditolak. Kabarin customernya via WA ya.")
+        return
+
+    if data.startswith("wo_ok:"):
+        import json as _json
+        pid = data.split(":", 1)[1]
+        sheets = _sheets()
+        row = sheets.get_pesanan_web(pid)
+        if not row or str(row.get("Status", "")) != "Menunggu":
+            await query.edit_message_text(f"Order online {pid} udah diproses sebelumnya.")
+            return
+        sheets.set_pesanan_web_status(pid, "Diproses")
+        context.user_data["pending_order"] = _json.loads(row["Payload"])
+        data = "order_confirm"
+
     if data == "order_confirm":
         parsed = context.user_data.pop("pending_order", None)
         if not parsed:
@@ -1565,6 +1588,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.exception("gagal mirror order")
         await _kirim_invoice(update, context, no_invoice)
         await _kirim_surat_jalan(update, context, no_invoice)
+        if parsed.get("_web"):
+            try:
+                img, kpdf = documents.generate_konfirmasi_pesanan(
+                    no_invoice, parsed.get("nama_customer", ""), parsed.get("no_hp", ""), parsed.get("alamat", ""),
+                    parsed["items"], parsed.get("ongkir", 0) or 0, parsed.get("tanggal_kirim", ""),
+                    parsed.get("no_po_customer", ""), parsed.get("catatan", ""))
+                await update.effective_chat.send_document(
+                    document=kpdf, filename=f"Konfirmasi-{no_invoice}.pdf",
+                    caption=f"Konfirmasi Pesanan {no_invoice} — print & kasih ke {parsed.get('nama_customer','')}")
+            except Exception:
+                logger.exception("gagal bikin konfirmasi pesanan")
         return
 
     if data == "editorder_cancel":
@@ -2186,9 +2220,60 @@ async def pengingat_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _send_text(update, "\n".join(lines))
 
 
+async def _notify_web_order(app, pid, parsed):
+    """Order dari halaman web customer -> preview + tombol di Telegram admin."""
+    text = "🌐 ORDER ONLINE (" + pid + ")\n\n" + _order_preview_text(parsed).replace("*", "")
+    if parsed.get("catatan"):
+        text += f"\n📝 Catatan: {parsed['catatan']}"
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Simpan & buat dokumen", callback_data=f"wo_ok:{pid}"),
+                                InlineKeyboardButton("❌ Tolak", callback_data=f"wo_no:{pid}")]])
+    for chat_id in [c for c in config.OWNER_TELEGRAM_IDS if c]:
+        try:
+            await app.bot.send_message(chat_id=chat_id, text=text, reply_markup=kb)
+        except Exception:
+            logger.exception("gagal kirim order web ke %s", chat_id)
+    await _mirror(app.bot, "order", text=text, reply_markup=kb)
+
+
+@owner_only
+async def linkorder_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    nama = " ".join(context.args).strip() if context.args else ""
+    if not nama:
+        await update.effective_message.reply_text("Format: /linkorder Grandia")
+        return
+    sheets = _sheets()
+    cust = sheets.get_customer(nama)
+    if not cust:
+        cands = [c for c in sheets.get_customer_names() if nama.lower() in str(c).lower()]
+        if len(cands) == 1:
+            nama = cands[0]
+        elif not cands:
+            await update.effective_message.reply_text(
+                f"Customer '{nama}' belum ada di sheet Customers. Bikin dulu (kirim 1 order atas namanya) lalu ulangi.")
+            return
+        else:
+            await update.effective_message.reply_text("Ada beberapa yang mirip: " + ", ".join(cands) + ". Tulis nama lengkapnya.")
+            return
+    token = sheets.get_or_create_link(nama)
+    if not config.PUBLIC_BASE_URL:
+        await update.effective_message.reply_text(
+            "Link-nya udah dibikin, tapi alamat publik bot belum aktif. Nyalain Public Domain di Railway "
+            "(Settings → Networking → Generate Domain), lalu ketik /linkorder lagi.")
+        return
+    await update.effective_message.reply_text(
+        f"🔗 Link order {nama}:\n{config.PUBLIC_BASE_URL}/order/{token}\n\n"
+        "Kirim link ini ke dia. Order yang masuk muncul di Telegram buat lu konfirmasi.")
+
+
 async def on_startup(app: Application):
     # panggil sekali biar SheetsClient nyiapin skema tab kalau belum ada
     _sheets()
+    try:
+        import webapp
+        app.bot_data["web_runner"] = await webapp.start_web(
+            _sheets, lambda pid, parsed: _notify_web_order(app, pid, parsed))
+    except Exception:
+        logger.exception("web order gagal jalan (bot Telegram tetap jalan)")
     logger.info("Asisten Plastik siap jalan.")
 
 
@@ -2203,6 +2288,7 @@ def main():
     app.add_handler(CommandHandler("groupid", groupid_cmd))
     app.add_handler(CommandHandler("pricelist", pricelist_cmd))
     app.add_handler(CommandHandler("topik", topik_cmd))
+    app.add_handler(CommandHandler("linkorder", linkorder_cmd))
     app.add_error_handler(error_handler)
     app.add_handler(CommandHandler("lunas", lunas_cmd))
     app.add_handler(CommandHandler("batallunas", batallunas_cmd))

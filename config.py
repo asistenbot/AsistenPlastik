@@ -132,3 +132,14 @@ SEED_TAGIHAN = [
 ]
 
 SHEET_TOPIK = "TopikGrup"
+
+# ==== ORDER ONLINE (link buat customer langganan) ====
+SHEET_LINKORDER = "LinkOrder"
+SHEET_PESANANWEB = "PesananWeb"
+# Nomor WA admin (format 628xxxx) buat tombol "Konfirmasi ke WA" di halaman order.
+ADMIN_WA = (os.getenv("ADMIN_WA") or "").strip().replace("+", "").replace(" ", "")
+# Alamat publik bot, mis. https://xxx.up.railway.app (kosong = pakai RAILWAY_PUBLIC_DOMAIN)
+PUBLIC_BASE_URL = (os.getenv("PUBLIC_BASE_URL") or "").strip().rstrip("/")
+if not PUBLIC_BASE_URL and os.getenv("RAILWAY_PUBLIC_DOMAIN"):
+    PUBLIC_BASE_URL = "https://" + os.getenv("RAILWAY_PUBLIC_DOMAIN").strip()
+WEB_PORT = int(os.getenv("PORT") or 8080)

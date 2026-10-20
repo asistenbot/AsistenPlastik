@@ -58,6 +58,8 @@ SCHEMA = {
         "Terkirim_Tgl", "Dibuat", "Catatan",
     ],
     config.SHEET_TOPIK: ["Kunci", "Chat_ID", "Thread_ID"],
+    config.SHEET_LINKORDER: ["Token", "Nama_Customer", "Aktif", "Dibuat"],
+    config.SHEET_PESANANWEB: ["ID", "Waktu", "Nama", "Payload", "Status"],
     config.SHEET_TAGIHAN: [
         "Nama", "Tipe", "Hari_Kontra_Bon", "Tempo_Hari", "Alias",
     ],
@@ -1153,6 +1155,41 @@ class SheetsClient:
                         data.append({"range": rowcol_to_a1(i, headers.index(k) + 1), "values": [[v]]})
                 if data:
                     ws.batch_update(data)
+                return True
+        return False
+
+    # ---------------- ORDER ONLINE ----------------
+
+    def get_link_by_token(self, token):
+        for r in self._records(self._ws(config.SHEET_LINKORDER)):
+            if str(r.get("Token", "")) == token and str(r.get("Aktif", "")).strip().upper() != "TIDAK":
+                return r
+        return None
+
+    def get_or_create_link(self, nama):
+        for r in self._records(self._ws(config.SHEET_LINKORDER)):
+            if str(r.get("Nama_Customer", "")).strip().lower() == nama.strip().lower() \
+                    and str(r.get("Aktif", "")).strip().upper() != "TIDAK":
+                return str(r["Token"])
+        token = uuid.uuid4().hex[:14]
+        self._ws(config.SHEET_LINKORDER).append_row([token, nama, "YA", _now_str()], value_input_option="RAW")
+        return token
+
+    def add_pesanan_web(self, pid, nama, payload_json):
+        self._ws(config.SHEET_PESANANWEB).append_row(
+            [pid, _now_str(), nama, payload_json, "Menunggu"], value_input_option="RAW")
+
+    def get_pesanan_web(self, pid):
+        for r in self._records(self._ws(config.SHEET_PESANANWEB)):
+            if str(r.get("ID", "")) == pid:
+                return r
+        return None
+
+    def set_pesanan_web_status(self, pid, status):
+        ws = self._ws(config.SHEET_PESANANWEB)
+        for i, row in enumerate(ws.get_all_values()[1:], start=2):
+            if row and row[0] == pid:
+                ws.batch_update([{"range": f"E{i}", "values": [[status]]}])
                 return True
         return False
 

@@ -480,3 +480,45 @@ def generate_po_image(no_po, nama_supplier, items):
     y = _total_block(cv, y, [], "TOTAL", rupiah(total)) + 34
     y = _footer(cv, y, "Mohon konfirmasi ketersediaan barang. Terima kasih.")
     return _output(cv, y + 10)
+
+
+def generate_konfirmasi_pesanan(no_invoice, nama_customer, no_hp, alamat, items, ongkir=0,
+                                tanggal_kirim="", no_po_customer="", catatan=""):
+    """Dokumen 'Konfirmasi Pesanan' (berwarna, PDF) buat dicetak & dikasih ke
+    customer setelah order online masuk."""
+    cv = _canvas_for(len(items), extra=60)
+    y = _header(cv, "KONFIRMASI PESANAN", no_invoice, _now_tanggal())
+    y = _party_block(cv, y, "PEMESAN", nama_customer, no_hp, alamat, max_w=WIDTH - 2 * MARGIN) + 20
+    for label, val in (("Tanggal Kirim", tanggal_kirim), ("No. PO Customer", no_po_customer)):
+        if val:
+            cv.text(MARGIN, y + 10, f"{label}: {val}", "bold", 15, INK)
+            y += 30
+    y += 6
+    columns = [
+        {"label": "NO", "w": 44, "align": "c", "key": "no"},
+        {"label": "ITEM", "w": 392, "align": "l", "key": "nama_item", "pad14": True},
+        {"label": "QTY", "w": 80, "align": "r", "key": "qty"},
+        {"label": "SATUAN", "w": 70, "align": "l", "key": "satuan"},
+        {"label": "HARGA", "w": 130, "align": "r", "key": "harga"},
+        {"label": "SUBTOTAL", "w": 184, "align": "r", "key": "subtotal", "edge": True},
+    ]
+    rows, total = [], 0.0
+    for it in items:
+        qty = _to_float(it.get("qty"))
+        harga = _to_float(it.get("harga_satuan"))
+        total += qty * harga
+        rows.append({"nama_item": it.get("nama_item", ""), "qty": _fmt_qty(qty), "satuan": it.get("satuan", ""),
+                     "harga": rupiah(harga), "subtotal": rupiah(qty * harga)})
+    y = _table(cv, y, columns, rows, item_idx=1) + 26
+    lines = []
+    if ongkir:
+        lines.append(("Subtotal", rupiah(total)))
+        lines.append(("Ongkir", rupiah(_to_float(ongkir))))
+    y = _total_block(cv, y, lines, "TOTAL", rupiah(total + _to_float(ongkir))) + 30
+    if catatan:
+        for ln in _wrap("Catatan: " + str(catatan), "reg", 14, WIDTH - 2 * MARGIN)[:3]:
+            cv.text(MARGIN, y, ln, "reg", 14, BODY)
+            y += 22
+        y += 10
+    y = _footer(cv, y, "Mohon konfirmasi pesanan ini via WhatsApp. Terima kasih.")
+    return _output(cv, y + 10)

@@ -10,10 +10,12 @@ Jadi Riky cuma perlu bikin 1 spreadsheet KOSONG & share ke service account
 -- sisanya otomatis.
 """
 
+import copy
 import datetime
 import json
 import logging
 import threading
+import time
 import uuid
 
 import gspread
@@ -32,8 +34,9 @@ SCOPES = [
 SCHEMA = {
     config.SHEET_PRICELIST: [
         "Item_Code", "Nama", "Deskripsi", "Kategori", "Satuan",
-        "Harga_Jual", "Harga_Beli",
+        "Harga_Jual", "Harga_Beli", "Khusus_Customer",
     ],
+    config.SHEET_HARGA_CUSTOMER: ["Customer", "Item_Code", "Harga_Jual"],
     config.SHEET_CUSTOMERS: ["Nama", "No_HP", "Alamat"],
     config.SHEET_ORDERS: [
         "Timestamp", "No_Invoice", "Nama_Customer", "No_HP", "Alamat",
@@ -119,6 +122,60 @@ def _now_str():
     return now.strftime("%Y-%m-%d %H:%M:%S")
 
 
+_WRITE_METHODS = {
+    "append_row", "append_rows", "update", "update_cell", "update_cells", "update_acell",
+    "batch_update", "delete_rows", "delete_row", "insert_row", "insert_rows", "clear",
+    "batch_clear", "format", "batch_format", "resize", "add_rows", "add_cols", "sort",
+    "merge_cells", "unmerge_cells", "freeze", "set_basic_filter", "clear_basic_filter",
+}
+_CACHE_TTL = 20  # detik; hemat kuota baca Google Sheets (maks 60 baca/menit)
+
+
+class _CachedWS:
+    """Pembungkus Worksheet: hasil baca disimpen sebentar (TTL) dan dibuang
+    otomatis tiap ada penulisan ke tab yang sama."""
+
+    def __init__(self, ws, cache, lock):
+        self._ws, self._cache, self._lock = ws, cache, lock
+
+    def _read(self, name, *a, **kw):
+        key = (self._ws.title, name, repr(a), repr(sorted(kw.items())))
+        now = time.time()
+        with self._lock:
+            hit = self._cache.get(key)
+            if hit and now - hit[0] < _CACHE_TTL:
+                return copy.deepcopy(hit[1])
+        val = getattr(self._ws, name)(*a, **kw)
+        with self._lock:
+            self._cache[key] = (time.time(), copy.deepcopy(val))
+        return val
+
+    def _invalidate(self):
+        with self._lock:
+            for k in [k for k in self._cache if k[0] == self._ws.title]:
+                del self._cache[k]
+
+    def get_all_values(self, *a, **kw):
+        return self._read("get_all_values", *a, **kw)
+
+    def get_all_records(self, *a, **kw):
+        return self._read("get_all_records", *a, **kw)
+
+    def row_values(self, *a, **kw):
+        return self._read("row_values", *a, **kw)
+
+    def __getattr__(self, name):
+        attr = getattr(self._ws, name)
+        if name in _WRITE_METHODS and callable(attr):
+            def wrapped(*a, **kw):
+                try:
+                    return attr(*a, **kw)
+                finally:
+                    self._invalidate()
+            return wrapped
+        return attr
+
+
 class SheetsClient:
     def __init__(self):
         if config.GOOGLE_SERVICE_ACCOUNT_JSON:
@@ -131,6 +188,9 @@ class SheetsClient:
         self.gc = gspread.authorize(creds)
         self.sh = self.gc.open_by_key(config.GOOGLE_SHEET_ID)
         self._lock = threading.Lock()
+        self._ws_objs = {}
+        self._data_cache = {}
+        self._cache_lock = threading.Lock()
         self._ensure_schema()
 
     # ---------------- SETUP OTOMATIS ----------------
@@ -273,7 +333,11 @@ class SheetsClient:
                 ws.append_rows(data, value_input_option="RAW")
 
     def _ws(self, name):
-        return self.sh.worksheet(name)
+        ws = self._ws_objs.get(name)
+        if ws is None:
+            ws = self.sh.worksheet(name)
+            self._ws_objs[name] = ws
+        return _CachedWS(ws, self._data_cache, self._cache_lock)
 
     # kolom yang isinya BISA kelihatan angka murni (no HP, kode item) tapi
     # harus tetap dibaca sebagai teks -- kalau enggak, gspread otomatis
@@ -1159,6 +1223,20 @@ class SheetsClient:
         return False
 
     # ---------------- ORDER ONLINE ----------------
+
+    def get_harga_customer(self, nama):
+        """{ITEM_CODE: harga khusus} buat 1 customer (tab HargaCustomer)."""
+        out = {}
+        for r in self._records(self._ws(config.SHEET_HARGA_CUSTOMER)):
+            if str(r.get("Customer", "")).strip().lower() == str(nama).strip().lower():
+                code = str(r.get("Item_Code", "")).strip().upper()
+                try:
+                    h = float(r.get("Harga_Jual"))
+                except (TypeError, ValueError):
+                    continue
+                if code and h > 0:
+                    out[code] = h
+        return out
 
     def get_link_by_token(self, token):
         for r in self._records(self._ws(config.SHEET_LINKORDER)):

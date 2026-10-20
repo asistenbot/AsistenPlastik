@@ -135,6 +135,7 @@ SHEET_TOPIK = "TopikGrup"
 
 # ==== ORDER ONLINE (link buat customer langganan) ====
 SHEET_LINKORDER = "LinkOrder"
+SHEET_HARGA_CUSTOMER = "HargaCustomer"
 SHEET_PESANANWEB = "PesananWeb"
 # Nomor WA admin (format 628xxxx) buat tombol "Konfirmasi ke WA" di halaman order.
 ADMIN_WA = (os.getenv("ADMIN_WA") or "").strip().replace("+", "").replace(" ", "")

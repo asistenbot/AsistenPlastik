@@ -84,51 +84,49 @@ def _wrap(s, n):
 def _cell(text, w, al):
     text = str(text)
     if al == "l":
-        return (" " + text).ljust(w)[:w]
+        return text.ljust(w)[:w]
     if al == "r":
-        return (text + " ").rjust(w)[-w:]
+        return text.rjust(w)[-w:]
     return text.center(w)[:w]
 
 
 def _row(cells, widths, aligns):
-    return "│" + "│".join(_cell(c, w, a) for c, w, a in zip(cells, widths, aligns)) + "│"
+    """Satu baris tabel tanpa garis kotak: kolom dipisah 1 spasi (total 80 kolom)."""
+    return " ".join(_cell(c, w, a) for c, w, a in zip(cells, widths, aligns))
 
 
-def _hl(left, mid, right, widths):
-    return left + mid.join("─" * w for w in widths) + right
-
-
-def _framed(s=""):
-    return "│" + str(s).ljust(INNER)[:INNER] + "│"
+def _hl(ch="-"):
+    return ch * COLS
 
 
 # ------------------------------------------------------------ susun halaman
 def _party_lines(nama, no_hp, alamat, metode, no_po, tgl_kirim):
     out = []
-    nl = _wrap(nama, 66)
-    out.append(" Kepada : " + nl[0])
+    nl = _wrap(nama, 70)
+    out.append("Kepada : " + nl[0])
     for extra in nl[1:]:
-        out.append("           " + extra)
-    out.append(" HP     : " + str(no_hp or "-"))
-    al = _wrap(alamat or "-", 66)
-    out.append(" Alamat : " + al[0])
+        out.append("         " + extra)
+    out.append("HP     : " + str(no_hp or "-"))
+    al = _wrap(alamat or "-", 70)
+    out.append("Alamat : " + al[0])
     for extra in al[1:3]:
-        out.append("           " + extra)
-    m = " Metode : " + str(metode or "-")
+        out.append("         " + extra)
+    m = "Metode : " + str(metode or "-")
     if tgl_kirim:
-        m = m.ljust(36) + "Tgl Kirim : " + str(tgl_kirim)
+        m = m.ljust(34) + "Tgl Kirim : " + str(tgl_kirim)
     out.append(m)
     if no_po:
-        out.append(" No. PO : " + str(no_po)[:66])
+        out.append("No. PO : " + str(no_po)[:66])
     return out
 
 
 def _build(doc_title, no_dok, ref_line, party, widths, aligns, head, item_groups,
            footer_fn, footer_len):
     """Balikin list halaman. Tiap halaman = (baris_png, baris_txt, judul_besar).
-    baris_png: judul besar dikosongin (digambar terpisah); baris_txt: judul
-    ditulis biasa di baris ke-2."""
-    header_len = 5 + len(party) + 3          # sampai garis bawah header tabel
+    baris_png: judul besar dikosongin (digambar terpisah, dobel ukuran);
+    baris_txt: judul ditulis biasa di baris pertama. Tanpa kotak/bingkai --
+    cuma garis pemisah horizontal, isinya full 80 kolom."""
+    header_len = 3 + 1 + len(party) + 3      # judul(3) + garis + pihak + garis/kepala/garis tabel
     last_cap = PAGE_LINES - header_len - footer_len
     mid_cap = PAGE_LINES - header_len - 2    # garis tutup + "bersambung"
 
@@ -155,25 +153,22 @@ def _build(doc_title, no_dok, ref_line, party, widths, aligns, head, item_groups
         name = config.BUSINESS_NAME.upper()
 
         def build(variant):
-            L = [_hl("┌", "─", "┐", [INNER])]
             title_txt = doc_title if variant == "txt" else ""
-            L.append(_framed(" " + name.ljust(INNER - 2 - len(title_txt) - 1) + title_txt))
-            L.append(_framed(" No  : " + no_dok))
-            r3 = " " + ref_line
-            L.append(_framed(r3.ljust(INNER - len(hal) - 1) + hal))
-            L.append(_hl("├", "─", "┤", [INNER]))
-            for p in party:
-                L.append(_framed(p))
-            L.append(_hl("├", "┬", "┤", widths))
+            L = [name.ljust(COLS - len(title_txt)) + title_txt,
+                 "No  : " + no_dok,
+                 ref_line.ljust(COLS - len(hal)) + hal,
+                 _hl("=")]
+            L.extend(party)
+            L.append(_hl("-"))
             L.append(_row(head, widths, ["c"] * len(widths)))
-            L.append(_hl("├", "┼", "┤", widths))
+            L.append(_hl("-"))
             for g in gs:
                 L.extend(g)
             if last:
                 L.extend(footer_fn(widths, 0))
             else:
-                L.append(_hl("└", "┴", "┘", widths))
-                L.append("  ... bersambung ke halaman berikutnya")
+                L.append(_hl("-"))
+                L.append("... bersambung ke halaman berikutnya")
             return L
 
         pages.append((build("png"), build("txt"), doc_title))
@@ -266,25 +261,25 @@ class _Page:
 def _render(lines, title):
     p = _Page()
     for li, s in enumerate(lines):
-        bold_line = li in (1,)
+        bold_line = li == 0
         for ci, ch in enumerate(s):
             p.glyph(ch, ci, li, 1, bold_line)
     # judul besar (2x lebar & tinggi) di kanan atas
-    col = COLS - 3 - 2 * len(title)
-    p.text(col, 1, title, 2, True)
+    col = COLS - 2 * len(title)
+    p.text(col, 0, title, 2, True)
     return p.png()
 
 
 def _finish(pages):
     pngs = [_render(png_lines, title) for png_lines, _, title in pages]
-    txt = "\r\n\f".join("\r\n".join(txt_lines) for _, txt_lines, _ in pages) + "\r\n"
+    txt = "\r\n\f".join("\r\n".join(l.rstrip() for l in txt_lines) for _, txt_lines, _ in pages) + "\r\n"
     return pngs, io.BytesIO(txt.encode("utf-8"))
 
 
 # ------------------------------------------------------------ public API
 def generate_invoice_dotmatrix(no_invoice, nama_customer, no_hp, alamat, metode, items,
                                ongkir=0, no_po_customer="", tanggal_kirim="", tanggal=None):
-    widths = [3, 31, 8, 6, 11, 14]
+    widths = [3, 33, 8, 6, 11, 14]            # + 5 spasi = 80 kolom
     aligns = ["c", "l", "r", "l", "r", "r"]
     head = ["NO", "NAMA BARANG", "QTY", "SAT", "HARGA(Rp)", "SUBTOTAL(Rp)"]
     sub = 0.0
@@ -297,45 +292,42 @@ def generate_invoice_dotmatrix(no_invoice, nama_customer, no_hp, alamat, metode,
         ongkir = float(ongkir or 0)
     except (TypeError, ValueError):
         ongkir = 0.0
-    groups = _item_groups(items, widths, aligns, widths[1] - 1, "invoice")
+    groups = _item_groups(items, widths, aligns, widths[1], "invoice")
 
     def footer(widths_, _n):
         def tot(label, val):
-            return _framed((f"{label:<9}: " + ("Rp " + _num(val)).rjust(15) + " ").rjust(INNER))
-        return [_hl("├", "┴", "┤", widths_),
+            return (f"{label:<9}: " + ("Rp " + _num(val)).rjust(15)).rjust(COLS)
+        return [_hl("-"),
                 tot("Subtotal", sub), tot("Ongkir", ongkir), tot("TOTAL", sub + ongkir),
-                _hl("├", "─", "┤", [INNER]),
-                _framed(f" Transfer : {config.BANK_NAME} {config.BANK_ACCOUNT_NUMBER} "
-                        f"a.n. {config.BANK_ACCOUNT_NAME}"),
-                _framed(" Terima kasih atas kepercayaan Anda."),
-                _hl("└", "─", "┘", [INNER])]
+                _hl("="),
+                f"Transfer : {config.BANK_NAME} {config.BANK_ACCOUNT_NUMBER} a.n. {config.BANK_ACCOUNT_NAME}",
+                "Terima kasih atas kepercayaan Anda."]
 
     party = _party_lines(nama_customer, no_hp, alamat, metode, no_po_customer, tanggal_kirim)
     pages = _build("INVOICE", no_invoice, "Tgl : " + _tgl_label(tanggal),
-                   party, widths, aligns, head, groups, footer, 8)
+                   party, widths, aligns, head, groups, footer, 7)
     return _finish(pages)
 
 
 def generate_surat_jalan_dotmatrix(no_surat_jalan, nama_customer, no_hp, alamat, metode, items,
                                    no_invoice_ref=None, no_po_customer="", tanggal_kirim="", tanggal=None):
-    widths = [3, 50, 9, 7, 5]
+    widths = [3, 53, 9, 7, 4]                 # + 4 spasi = 80 kolom
     aligns = ["c", "l", "r", "l", "c"]
     head = ["NO", "NAMA BARANG", "QTY", "SAT", "CEK"]
-    groups = _item_groups(items, widths, aligns, widths[1] - 1, "sj")
+    groups = _item_groups(items, widths, aligns, widths[1], "sj")
     n_items = len(items)
 
     def footer(widths_, _n):
-        return [_hl("├", "┴", "┤", widths_),
-                _framed(f" Total jenis barang : {n_items}"),
-                _framed(" Mohon periksa jumlah dan kondisi barang saat diterima."),
-                _framed(" " + "Dikirim oleh,".ljust(22) + " " * 32 + "Diterima oleh,".ljust(22) + " "),
-                _framed(""), _framed(""),
-                _framed(" " + "(____________________)" + " " * 32 + "(____________________)" + " "),
-                _hl("└", "─", "┘", [INNER])]
+        return [_hl("-"),
+                f"Total jenis barang : {n_items}",
+                "Mohon periksa jumlah dan kondisi barang saat diterima.",
+                "Dikirim oleh,".ljust(22) + " " * 34 + "Diterima oleh,".ljust(24),
+                "", "",
+                "(____________________)".ljust(22) + " " * 34 + "(____________________)"]
 
     tgl = _tgl_label(tanggal)
     ref = (f"Ref : {no_invoice_ref}   " if no_invoice_ref else "") + f"Tgl : {tgl}"
     party = _party_lines(nama_customer, no_hp, alamat, metode, no_po_customer, tanggal_kirim)
     pages = _build("SURAT JALAN", no_surat_jalan, ref, party, widths, aligns, head,
-                   groups, footer, 8)
+                   groups, footer, 7)
     return _finish(pages)

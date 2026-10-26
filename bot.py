@@ -83,9 +83,17 @@ def _has_pending(context):
 
 
 async def _send_text(update, text, reply_markup=None):
-    await update.effective_message.reply_text(
-        text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup
-    )
+    """Kirim teks Markdown; kalau Telegram nolak (mis. nama barang ada simbol
+    _ atau *), kirim ulang sebagai teks polos biar pesannya tetep sampai."""
+    from telegram.error import BadRequest
+    try:
+        await update.effective_message.reply_text(
+            text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup
+        )
+    except BadRequest as e:
+        if "parse entities" not in str(e).lower():
+            raise
+        await update.effective_message.reply_text(text.replace("*", ""), reply_markup=reply_markup)
 
 
 # ---------------- PREVIEW TEXT ----------------

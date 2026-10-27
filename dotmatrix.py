@@ -311,13 +311,67 @@ def _render_clean(lines, title):
     return img
 
 
+def _vector_pdf(pages):
+    """PDF 8,5 x 5,5 inch dengan TEKS ASLI (bukan gambar): driver printer
+    nge-render huruf pakai resolusi printer sendiri, jadi hasilnya jauh lebih
+    tajam & rapi di dot matrix dibanding PDF berisi gambar."""
+    from reportlab.pdfgen import canvas
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    if "DVMonoBold" not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont("DVMonoBold", os.path.join(BASE_DIR, "fonts", "DejaVuSansMono-Bold.ttf")))
+    W, H = 8.5 * 72, 5.5 * 72
+    cw, lh = 7.2, 12.0                      # 10 cpi, 6 lpi
+    size = cw / 0.602
+    x0, top = 18.0, 14.4
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=(W, H))
+    for lines, _, title in pages:
+        c.setFillColorRGB(0, 0, 0)
+        c.setStrokeColorRGB(0, 0, 0)
+        c.setFont("DVMonoBold", size)
+        for li, s_ in enumerate(lines):
+            ymid = H - top - li * lh - lh / 2
+            base = ymid - size * 0.28
+            run = ""
+            start = 0
+            for ci, ch in enumerate(s_ + "\0"):
+                if ch in ("─", "═"):
+                    continue
+                # tutup deretan garis sebelum karakter ini
+                j = ci - 1
+                while j >= 0 and j >= start and s_[j] in ("─", "═"):
+                    j -= 1
+                if j + 1 < ci and start <= j + 1:
+                    kind = s_[j + 1]
+                    xa, xb = x0 + (j + 1) * cw, x0 + ci * cw
+                    ys = [ymid] if kind == "─" else [ymid - 1.6, ymid + 1.6]
+                    c.setLineWidth(0.8)
+                    for yy in ys:
+                        c.line(xa, yy, xb, yy)
+                start = ci + 1
+            text = "".join(" " if ch in ("─", "═") else ch for ch in s_)
+            if text.strip():
+                t = c.beginText(x0, base)
+                t.setFont("DVMonoBold", size)
+                t.setCharSpace(0)
+                t.textOut(text.rstrip())
+                c.drawText(t)
+        # judul besar (2x) di kanan, mulai baris ke-2
+        tsize = size * 2
+        tw = pdfmetrics.stringWidth(title, "DVMonoBold", tsize)
+        c.setFont("DVMonoBold", tsize)
+        c.drawString(x0 + COLS * cw - tw, H - top - lh - lh / 2 - tsize * 0.28, title)
+        c.showPage()
+    c.save()
+    buf.seek(0)
+    return buf
+
+
 def _finish(pages):
     pngs = [_render(png_lines, title) for png_lines, _, title in pages]
     txt = "\r\n\f".join("\r\n".join(l.rstrip() for l in txt_lines) for _, txt_lines, _ in pages) + "\r\n"
-    clean = [_render_clean(png_lines, title) for png_lines, _, title in pages]
-    pdf = io.BytesIO()
-    clean[0].save(pdf, format="PDF", resolution=300.0, save_all=True, append_images=clean[1:])
-    pdf.seek(0)
+    pdf = _vector_pdf(pages)
     return pngs, io.BytesIO(txt.encode("utf-8")), pdf
 
 

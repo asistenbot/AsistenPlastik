@@ -34,8 +34,9 @@ SCOPES = [
 SCHEMA = {
     config.SHEET_PRICELIST: [
         "Item_Code", "Nama", "Deskripsi", "Kategori", "Satuan",
-        "Harga_Jual", "Harga_Beli", "Khusus_Customer", "Supplier",
+        "Harga_Jual", "Harga_Beli", "Khusus_Customer", "Supplier", "Isi_Bal", "Stok_Min",
     ],
+    config.SHEET_MUTASI: ["Waktu", "Item_Code", "Nama", "Jenis", "Qty", "Satuan", "Ref", "Catatan", "Oleh"],
     config.SHEET_HARGA_CUSTOMER: ["Customer", "Item_Code", "Harga_Jual"],
     config.SHEET_CUSTOMERS: ["Nama", "No_HP", "Alamat"],
     config.SHEET_ORDERS: [
@@ -504,20 +505,22 @@ class SheetsClient:
         rows, skipped = [], 0
         keymap = {"Item_Code": "item_code", "Nama": "nama", "Deskripsi": "deskripsi", "Kategori": "kategori",
                   "Satuan": "satuan", "Harga_Jual": "harga_jual", "Harga_Beli": "harga_beli",
-                  "Khusus_Customer": "khusus", "Supplier": "supplier"}
+                  "Khusus_Customer": "khusus", "Supplier": "supplier", "Isi_Bal": "isi_bal"}
         from gspread.utils import rowcol_to_a1
         values = ws.get_all_values()
         c_code = headers.index("Item_Code")
-        c_sup = headers.index("Supplier") if "Supplier" in headers else None
         fix = []
+        isi_kolom = [(headers.index(h), k) for h, k in (("Supplier", "supplier"), ("Isi_Bal", "isi_bal")) if h in headers]
         for p in products:
             if p["item_code"].upper() in have:
                 skipped += 1
-                if c_sup is not None and p.get("supplier"):
+                for c_x, key in isi_kolom:
+                    if not p.get(key):
+                        continue
                     for i, row in enumerate(values[1:], start=2):
                         if len(row) > c_code and row[c_code].strip().upper() == p["item_code"].upper() \
-                                and (len(row) <= c_sup or not row[c_sup].strip()):
-                            fix.append({"range": rowcol_to_a1(i, c_sup + 1), "values": [[p["supplier"]]]})
+                                and (len(row) <= c_x or not str(row[c_x]).strip()):
+                            fix.append({"range": rowcol_to_a1(i, c_x + 1), "values": [[p[key]]]})
                 continue
             rows.append([p.get(keymap.get(h, ""), "") for h in headers])
         if fix:
@@ -1291,6 +1294,88 @@ class SheetsClient:
         return False
 
     # ---------------- ORDER ONLINE ----------------
+
+    # ---------------- STOK GUDANG ----------------
+    # Stok dihitung dari: hitungan terakhir (Jenis "Hitung" = jumlah sebenarnya
+    # di gudang saat itu) + barang Masuk/Penyesuaian setelahnya - semua qty
+    # order (yang gak Batal) setelah hitungan itu. Jadi edit/batal order
+    # otomatis ikut, tanpa perlu catat stok keluar manual.
+
+    @staticmethod
+    def _f(v, default=0.0):
+        try:
+            return float(str(v).replace(",", ".").strip())
+        except (TypeError, ValueError):
+            return default
+
+    def add_mutasi(self, entries):
+        """entries: list dict {item_code,nama,jenis,qty,satuan,ref,catatan,oleh}."""
+        if not entries:
+            return 0
+        ts = _now_str()
+        rows = [[ts, e["item_code"], e.get("nama", ""), e["jenis"], e["qty"], e.get("satuan", ""),
+                 e.get("ref", ""), e.get("catatan", ""), e.get("oleh", "")] for e in entries]
+        self._ws(config.SHEET_MUTASI).append_rows(rows, value_input_option="RAW")
+        return len(rows)
+
+    def get_stok_all(self):
+        """List dict per produk: code,nama,kategori,satuan,isi_bal,min,stok(None=belum dihitung),status."""
+        produk = [r for r in self.get_price_list() if str(r.get("Item_Code", "")).strip()]
+        mut = self._records(self._ws(config.SHEET_MUTASI))
+        by_item = {}
+        for m in mut:
+            by_item.setdefault(str(m.get("Item_Code", "")).strip().upper(), []).append(m)
+        orders = [o for o in self.get_all_orders() if str(o.get("Status", "")) != "Batal"]
+        ord_by = {}
+        for o in orders:
+            ord_by.setdefault(str(o.get("Item_Code", "")).strip().upper(), []).append(o)
+        out = []
+        for r in produk:
+            code = str(r["Item_Code"]).strip()
+            ms = sorted(by_item.get(code.upper(), []), key=lambda m: str(m.get("Waktu", "")))
+            hit = [m for m in ms if m.get("Jenis") == "Hitung"]
+            stok, t0 = None, ""
+            if hit:
+                t0 = str(hit[-1].get("Waktu", ""))
+                stok = self._f(hit[-1].get("Qty"))
+                for m in ms:
+                    if str(m.get("Waktu", "")) > t0 and m.get("Jenis") in ("Masuk", "Penyesuaian"):
+                        stok += self._f(m.get("Qty"))
+                for o in ord_by.get(code.upper(), []):
+                    if str(o.get("Timestamp", "")) > t0:
+                        stok -= self._f(o.get("Qty"))
+            mn = self._f(r.get("Stok_Min"))
+            if stok is None:
+                status = "belum"
+            elif stok <= 0:
+                status = "habis"
+            elif mn > 0 and stok <= mn:
+                status = "menipis"
+            else:
+                status = "aman"
+            out.append({"code": code, "nama": r.get("Nama", "") + (
+                        " - " + str(r.get("Deskripsi")) if str(r.get("Deskripsi", "")).strip() not in ("", "POLOS") else ""),
+                        "kategori": r.get("Kategori", ""), "satuan": r.get("Satuan", ""),
+                        "isi_bal": self._f(r.get("Isi_Bal")), "min": mn, "stok": stok, "status": status})
+        return out
+
+    def get_mutasi_recent(self, n=15):
+        rows = self._records(self._ws(config.SHEET_MUTASI))
+        return sorted(rows, key=lambda m: str(m.get("Waktu", "")), reverse=True)[:n]
+
+    def set_stok_setting(self, code, field, value):
+        """field: 'min' atau 'isi_bal' -> kolom Stok_Min / Isi_Bal di PriceList."""
+        from gspread.utils import rowcol_to_a1
+        ws = self._ws(config.SHEET_PRICELIST)
+        values = ws.get_all_values()
+        headers = values[0]
+        col = headers.index("Stok_Min" if field == "min" else "Isi_Bal")
+        c_code = headers.index("Item_Code")
+        for i, row in enumerate(values[1:], start=2):
+            if len(row) > c_code and row[c_code].strip().upper() == code.strip().upper():
+                ws.batch_update([{"range": rowcol_to_a1(i, col + 1), "values": [[value]]}])
+                return True
+        return False
 
     def get_harga_customer(self, nama):
         """{ITEM_CODE: harga khusus} buat 1 customer (tab HargaCustomer)."""

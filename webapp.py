@@ -130,7 +130,7 @@ def make_web_app(sheets_getter, on_order):
         token = request.match_info["token"]
         sheets = sheets_getter()
         link = await asyncio.to_thread(sheets.get_link_by_token, token)
-        if not link:
+        if not link or str(link.get("Nama_Customer", "")).startswith("@"):
             return web.Response(status=404, text="Link order tidak valid / sudah dinonaktifkan.")
         nama_c = str(link.get("Nama_Customer", ""))
         rows = await asyncio.to_thread(sheets.get_price_list)
@@ -157,7 +157,7 @@ def make_web_app(sheets_getter, on_order):
         sheets = sheets_getter()
         try:
             link = await asyncio.to_thread(sheets.get_link_by_token, token)
-            if not link:
+            if not link or str(link.get("Nama_Customer", "")).startswith("@"):
                 return web.json_response({"ok": False, "error": "Link tidak valid"}, status=404)
             body = await request.json()
             req = body.get("items") or []
@@ -208,6 +208,8 @@ def make_web_app(sheets_getter, on_order):
             return web.json_response({"ok": False, "error": "Server bermasalah"}, status=500)
 
     app = web.Application(client_max_size=256 * 1024)
+    import stokweb
+    stokweb.add_stok_routes(app, sheets_getter)
     app.router.add_get("/", health)
     app.router.add_get("/order/{token}", form)
     app.router.add_post("/order/{token}", submit)

@@ -324,7 +324,7 @@ Command di bawah ini cadangan aja kalau mau lebih pasti/cepat:
 (kalau customer punya banyak invoice, bot kasih daftar buat dipilih)
 /lunas <no invoice atau nama customer> — tandai order sudah dibayar
 /harga <kategori/nama> <harga> [beli] — ubah harga banyak produk sekaligus (ada preview)
-/pengingat — lihat jadwal pengingat (kontra bon, tagihan, bayar supplier)
+/stok [nama] — cek stok menipis / stok barang tertentu\n/linkgudang — link input stok buat pegawai\n/linkdashboard — link dashboard stok (lu aja)\n/pengingat — lihat jadwal pengingat (kontra bon, tagihan, bayar supplier)
 /piutang — rekap tagihan customer yang belum lunas
 
 /po — bikin Purchase Order (belanja) ke supplier
@@ -590,7 +590,7 @@ async def dokumen_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------------- TOPIK GRUP ----------------
 TOPIK_LABEL = {
     "order": "🛒 Order", "invoice": "🧾 Invoice", "suratjalan": "🚚 Surat Jalan",
-    "po": "📦 PO Supplier", "rekap": "📊 Rekap Bulanan", "pengingat": "⏰ Pengingat", "error": "⚠️ Error",
+    "po": "📦 PO Supplier", "rekap": "📊 Rekap Bulanan", "stok": "📦 Stok Menipis", "pengingat": "⏰ Pengingat", "error": "⚠️ Error",
 }
 _TOPIK_CACHE = {"data": None}
 
@@ -2298,6 +2298,96 @@ async def hargakategori_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text("\n".join(lines), reply_markup=kb)
 
 
+def _fmt_stok(i):
+    st = i["stok"]
+    t = f"{st:g} {i['satuan']}"
+    if i["isi_bal"] > 0 and st >= i["isi_bal"]:
+        t += f" (±{st / i['isi_bal']:.1f} bal)"
+    return t
+
+
+def _teks_stok_menipis(items):
+    low = [i for i in items if i["status"] in ("habis", "menipis")]
+    if not low:
+        return ""
+    low.sort(key=lambda i: (i["status"] != "habis", i["nama"]))
+    lines = ["📦 STOK MENIPIS — waktunya order:", ""]
+    for i in low:
+        need = max(i["min"] * 2 - (i["stok"] or 0), 0)
+        ic = "🔴" if i["status"] == "habis" else "🟡"
+        s_ = f"{ic} {i['nama']}: sisa {_fmt_stok(i)} (min {i['min']:g})"
+        if need > 0:
+            s_ += f" → order ±{need:g} {i['satuan']}"
+            if i["isi_bal"] > 0:
+                s_ += f" (±{-(-need // i['isi_bal']):.0f} bal)"
+        lines.append(s_)
+    return "\n".join(lines)
+
+
+async def stok_job(context: ContextTypes.DEFAULT_TYPE):
+    """Tiap hari (>= jam 08 WIB): kabarin barang yang stoknya menipis/habis."""
+    now = _wib_now()
+    if now.hour < config.REMINDER_HOUR:
+        return
+    ref = f"STOK-{now.strftime('%Y-%m-%d')}"
+    try:
+        sheets = _sheets()
+        if any(str(r.get("Ref", "")) == ref for r in sheets._reminder_records()):
+            return
+        teks = _teks_stok_menipis(sheets.get_stok_all())
+        rid = sheets.add_reminder("stok", ref, "Cek Stok", 0, now.date(), "Alert stok harian")
+        sheets.update_reminder(rid, Status="Selesai")
+        if not teks:
+            return
+        for chat_id in [c for c in config.OWNER_TELEGRAM_IDS if c]:
+            try:
+                await context.bot.send_message(chat_id=chat_id, text=teks)
+            except Exception:
+                logger.exception("gagal kirim alert stok ke %s", chat_id)
+        await _mirror(context.bot, "stok", text=teks)
+    except Exception:
+        logger.exception("gagal cek stok harian")
+
+
+@owner_only
+async def stok_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = " ".join(context.args).lower() if context.args else ""
+    items = _sheets().get_stok_all()
+    if q:
+        items = [i for i in items if q in (i["nama"] + " " + i["code"] + " " + i["kategori"]).lower()]
+        if not items:
+            await update.effective_message.reply_text(f"Gak nemu barang '{q}'.")
+            return
+        lines = [f"{'🟢' if i['status']=='aman' else '🟡' if i['status']=='menipis' else '🔴' if i['status']=='habis' else '⚪'} "
+                 f"{i['nama']}: {_fmt_stok(i) if i['stok'] is not None else 'belum dihitung'}" for i in items[:30]]
+        await update.effective_message.reply_text("\n".join(lines))
+        return
+    teks = _teks_stok_menipis(items)
+    belum = sum(1 for i in items if i["status"] == "belum")
+    await update.effective_message.reply_text(
+        (teks or "✅ Gak ada stok yang menipis.") + (f"\n\n⚪ {belum} barang belum dihitung stoknya." if belum else "")
+        + "\n\nCek barang tertentu: /stok <nama>")
+
+
+async def _kirim_link_akses(update, peran, judul, path):
+    sheets = _sheets()
+    token = sheets.get_or_create_link(peran)
+    if not config.PUBLIC_BASE_URL:
+        await update.effective_message.reply_text("Alamat publik bot belum aktif (PUBLIC_BASE_URL).")
+        return
+    await update.effective_message.reply_text(f"🔗 {judul}:\n{config.PUBLIC_BASE_URL}/{path}/{token}")
+
+
+@owner_only
+async def linkgudang_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _kirim_link_akses(update, "@gudang", "Link input stok gudang (kasih ke pegawai)", "gudang")
+
+
+@owner_only
+async def linkdashboard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _kirim_link_akses(update, "@owner", "Link dashboard stok (RAHASIA, buat lu aja)", "dashboard")
+
+
 @owner_only
 async def importgrandia_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from data_grandia import PRODUK_GRANDIA
@@ -2362,6 +2452,9 @@ def main():
     app.add_handler(CommandHandler("pricelist", pricelist_cmd))
     app.add_handler(CommandHandler("topik", topik_cmd))
     app.add_handler(CommandHandler("linkorder", linkorder_cmd))
+    app.add_handler(CommandHandler("linkgudang", linkgudang_cmd))
+    app.add_handler(CommandHandler("linkdashboard", linkdashboard_cmd))
+    app.add_handler(CommandHandler("stok", stok_cmd))
     app.add_handler(CommandHandler("harga", hargakategori_cmd))
     app.add_handler(CommandHandler("hargakategori", hargakategori_cmd))
     app.add_handler(CommandHandler("importgrandia", importgrandia_cmd))
@@ -2389,6 +2482,7 @@ def main():
     else:
         app.job_queue.run_repeating(reminder_job, interval=600, first=45)
         app.job_queue.run_repeating(rekap_job, interval=3600, first=120)
+        app.job_queue.run_repeating(stok_job, interval=3600, first=180)
 
     logger.info("Starting polling...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)

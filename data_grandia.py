@@ -13,7 +13,7 @@ PRODUK_GRANDIA = [
         "item_code": "HDT-" + "X".join(u.split("X")[:2]) + "-" + u.split("X")[2][2:],
         "nama": "HD Kantong Sampah Hitam Tulip " + u.replace("X", "x"),
         "deskripsi": "POLOS", "kategori": "SAMPAH", "satuan": "Pak",
-        "harga_jual": 23000, "harga_beli": beli, "khusus": "Grandia", "supplier": "Cave Sumber Berkat",
+        "harga_jual": 23000, "harga_beli": beli, "khusus": "Grandia", "supplier": "Cave Sumber Berkat", "isi_bal": 25,
     }
     for u, beli in _UKURAN
 ]

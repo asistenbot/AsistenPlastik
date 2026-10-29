@@ -652,6 +652,11 @@ async def topik_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def error_handler(update, context: ContextTypes.DEFAULT_TYPE):
+    from telegram.error import NetworkError, TimedOut, RetryAfter
+    if isinstance(context.error, (NetworkError, TimedOut, RetryAfter)):
+        # gangguan koneksi sesaat ke Telegram: library otomatis nyoba lagi, gak perlu ganggu admin
+        logger.warning("gangguan jaringan sesaat ke Telegram: %s", context.error)
+        return
     logger.error("error di bot", exc_info=context.error)
     err = f"⚠️ {type(context.error).__name__}: {str(context.error)[:300]}"
     await _mirror(context.bot, "error", text=err)

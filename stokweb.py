@@ -272,6 +272,14 @@ def add_stok_routes(app, sheets_getter):
         return web.Response(body=data, content_type="application/pdf",
                             headers={"Content-Disposition": f'inline; filename="{nama}"'})
 
+    async def struk(request):
+        if not await _link(request, ("@owner",)):
+            return web.json_response({"ok": False, "error": "Link tidak valid"}, status=404)
+        from thermal import struk_surat_jalan
+        seg = await asyncio.to_thread(struk_surat_jalan, sheets_getter(), request.match_info["inv"])
+        return web.json_response({"ok": bool(seg), "seg": seg or [], "error": "" if seg else "Invoice tidak ketemu"})
+
+    app.router.add_get("/dashboard/{token}/struk/{inv}", struk)
     app.router.add_get("/dashboard/{token}/dok/{inv}/{kind}", dokumen)
     app.router.add_get("/dashboard/{token}/laporan", laporan)
     app.router.add_post("/dashboard/{token}/kontrabon", kontrabon)

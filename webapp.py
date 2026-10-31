@@ -214,6 +214,8 @@ def make_web_app(sheets_getter, on_order, on_staff_event=None):
     async def _noop(kind, data):
         return None
     staffweb.add_staff_routes(app, sheets_getter, on_staff_event or _noop)
+    import thermal
+    thermal.add_thermal_routes(app)
     app.router.add_get("/", health)
     app.router.add_get("/order/{token}", form)
     app.router.add_post("/order/{token}", submit)

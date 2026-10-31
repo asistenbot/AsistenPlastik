@@ -67,7 +67,7 @@ input,select,textarea{width:100%;padding:11px;border:1px solid var(--ln);border-
 .it{margin:10px 0;padding-bottom:10px;border-bottom:1px solid var(--ln)}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0}.chip{border:1px solid var(--ln);background:#fff;border-radius:18px;padding:8px 12px;font:inherit;font-size:14px}.chip.on{background:var(--g);color:#fff;border-color:var(--g)}.chip small{opacity:.8}.lnk{background:none;border:0;color:var(--g);padding:4px 0;font:inherit;font-size:13px;text-decoration:underline}
 .hide{display:none}.err{color:#b3261e;font-size:14px;min-height:20px}
-</style></head><body>
+</style><script src="/thermal.js"></script></head><body>
 <div id="app"></div>
 <script>
 const $=id=>document.getElementById(id);const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -115,8 +115,8 @@ $('go').onclick=async()=>{if(!confirm('Kirim hasil cek PO '+p.po+' ke owner?'))r
 $('go').disabled=true;const r=await api('terimapo',{po:p.po,catatan:$('cat').value,entries});
 if(r.ok){alert('✅ Terkirim ke owner, nunggu disetujui');poSel=null;tab='riwayat';await boot()}else{alert(r.error||'Gagal');$('go').disabled=false}};return}
 if(tab=='pesanan'){let h='<div class="info">Pesanan customer yang harus disiapkan. Setelah barang keluar gudang, tekan <b>Sudah dikirim</b>.</div>';
-D.orders.forEach(o=>{h+='<div class="card"><b>'+esc(o.customer)+' <span class="badge '+(o.dikirim?'Dikirim':'Menunggu')+'">'+(o.dikirim?'Dikirim':'Belum dikirim')+'</span></b><small>'+esc(o.invoice)+' • '+esc(o.tgl)+(o.kirim?' • kirim '+esc(o.kirim):'')+' • '+esc(o.metode)+'</small><div style="margin:6px 0">'+o.items.map(i=>'• '+esc(i.nama)+' — <b>'+esc(i.qty)+' '+esc(i.satuan)+'</b>').join('<br>')+'</div>'+(o.alamat?'<small>📍 '+esc(o.alamat)+'</small><br>':'')+(o.dikirim?'<small>oleh '+esc(o.dikirim_oleh)+' • '+esc(o.dikirim_waktu)+'</small>':'<button class="btn sm" data-k="'+esc(o.invoice)+'">✅ Sudah dikirim</button>')+' <a class="btn sm" style="text-decoration:none;display:inline-block;background:#555;color:#fff" target="_blank" rel="noopener" href="/staff/api/dok/'+encodeURIComponent(o.invoice)+'">🖨️ Surat Jalan</a></div>'});
-m.innerHTML=h||'<p>Belum ada pesanan.</p>';m.querySelectorAll('[data-k]').forEach(b=>b.onclick=async()=>{if(!confirm('Barang untuk '+b.dataset.k+' sudah keluar & dikirim?'))return;b.disabled=true;const r=await api('kirim',{invoice:b.dataset.k});if(r.ok)boot();else alert(r.error||'Gagal')});return}
+D.orders.forEach(o=>{h+='<div class="card"><b>'+esc(o.customer)+' <span class="badge '+(o.dikirim?'Dikirim':'Menunggu')+'">'+(o.dikirim?'Dikirim':'Belum dikirim')+'</span></b><small>'+esc(o.invoice)+' • '+esc(o.tgl)+(o.kirim?' • kirim '+esc(o.kirim):'')+' • '+esc(o.metode)+'</small><div style="margin:6px 0">'+o.items.map(i=>'• '+esc(i.nama)+' — <b>'+esc(i.qty)+' '+esc(i.satuan)+'</b>').join('<br>')+'</div>'+(o.alamat?'<small>📍 '+esc(o.alamat)+'</small><br>':'')+(o.dikirim?'<small>oleh '+esc(o.dikirim_oleh)+' • '+esc(o.dikirim_waktu)+'</small>':'<button class="btn sm" data-k="'+esc(o.invoice)+'">✅ Sudah dikirim</button>')+' <a class="btn sm" style="text-decoration:none;display:inline-block;background:#555;color:#fff" target="_blank" rel="noopener" href="/staff/api/dok/'+encodeURIComponent(o.invoice)+'">🖨️ Surat Jalan</a> <button class="btn sm" style="background:#2a6fb5" data-th="'+esc(o.invoice)+'">📠 Thermal 58mm</button></div>'});
+m.innerHTML=(h||'<p>Belum ada pesanan.</p>')+'<p class="mu" style="text-align:center">📠 Thermal: pakai Chrome di Android, printer nyala. <button class="lnk" id="gp">Ganti printer</button></p>';$('gp').onclick=()=>window.gantiPrinterThermal&&gantiPrinterThermal();m.querySelectorAll('[data-th]').forEach(b=>b.onclick=()=>cetakThermal('/staff/api/struk/'+encodeURIComponent(b.dataset.th),b));m.querySelectorAll('[data-k]').forEach(b=>b.onclick=async()=>{if(!confirm('Barang untuk '+b.dataset.k+' sudah keluar & dikirim?'))return;b.disabled=true;const r=await api('kirim',{invoice:b.dataset.k});if(r.ok)boot();else alert(r.error||'Gagal')});return}
 if(tab=='riwayat'){let h='<div class="info">Pengajuan stok kamu. <b>Menunggu</b> = belum disetujui owner.</div>';
 const by={};D.pengajuan.forEach(p=>{(by[p.Batch]=by[p.Batch]||[]).push(p)});Object.keys(by).reverse().forEach(b=>{const L=by[b];h+='<div class="card"><b>'+esc(L[0].Jenis=='Masuk'?'Barang Masuk':'Hitung Stok')+' <span class="badge '+esc(L[0].Status)+'">'+esc(L[0].Status)+'</span></b><small>'+esc(L[0].Waktu)+(L[0].Ref?' • '+esc(L[0].Ref):'')+'</small><div style="margin-top:5px">'+L.map(p=>'• '+esc(p.Nama)+': <b>'+esc(p.Qty)+' '+esc(p.Satuan)+'</b>').join('<br>')+'</div></div>'});
 if(D.permintaan.length){h+='<h3>Permintaan barang</h3>'+D.permintaan.map(q=>'<div class="card"><b>'+esc(q.Nama)+': '+esc(q.Qty)+' '+esc(q.Satuan)+' <span class="badge '+esc(q.Status)+'">'+esc(q.Status)+'</span></b><small>'+esc(q.Waktu)+(q.Catatan?' • '+esc(q.Catatan):'')+'</small></div>').join('')}
@@ -317,6 +317,14 @@ def add_staff_routes(app, sheets_getter, notify):
                             headers={"Content-Disposition": f'inline; filename="{nama}"'})
 
     app.router.add_post("/staff/api/terimapo", terimapo)
+    async def struk(request):
+        if not await _auth(request):
+            return web.json_response({"ok": False, "error": "Login dulu"}, status=401)
+        from thermal import struk_surat_jalan
+        seg = await asyncio.to_thread(struk_surat_jalan, sheets_getter(), request.match_info["inv"])
+        return web.json_response({"ok": bool(seg), "seg": seg or [], "error": "" if seg else "Invoice tidak ketemu"})
+
+    app.router.add_get("/staff/api/struk/{inv}", struk)
     app.router.add_get("/staff/api/dok/{inv}", dok_sj)
     app.router.add_post("/staff/api/ganti", ganti)
     app.router.add_get("/staff", page)

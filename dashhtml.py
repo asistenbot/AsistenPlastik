@@ -50,7 +50,7 @@ table{font-size:10pt}th{background:#eee!important;-webkit-print-color-adjust:exa
 td input{border:0!important;background:none!important;width:auto!important;text-align:right}
 .hide-s{display:table-cell!important}
 }
-</style></head><body>
+</style><script src="/thermal.js"></script></head><body>
 <header><h1>📊 __BIZ__</h1><button class="btn k" id="pr1">🖨️ Cetak halaman ini</button><button class="btn k" id="prAll">🖨️ Cetak semua laporan</button><input type="month" id="bln" placeholder="2026-10" pattern="[0-9]{4}-[0-9]{2}"></header>
 <div id="phead"><h1>__BIZ__</h1><div id="phinfo"></div></div>
 <div class="tabs" id="tabs"></div>
@@ -87,7 +87,7 @@ function card(l,v,cls,sub){return '<div class="card '+(cls||'')+'"><span>'+l+'</
 function hbars(arr,empty){if(!arr||!arr.length)return '<div class="empty">'+(empty||'Belum ada data.')+'</div>';const mx=Math.max(...arr.map(a=>a.total),1);
 return arr.map(a=>'<div class="hb"><div class="l" title="'+esc(a.nama)+'">'+esc(a.nama)+'</div><div class="t"><i style="width:'+Math.max(a.total/mx*100,1)+'%"></i></div><div class="v">'+rps(a.total)+'</div></div>').join('')}
 function vbars(arr,key,lab){const mx=Math.max(...arr.map(a=>a[key]),1);return '<div class="vc">'+arr.map(a=>'<div title="'+esc(a.tgl||a.bulan)+': '+rp(a[key])+'"><i style="height:'+(a[key]/mx*100)+'%"></i><small>'+lab(a)+'</small></div>').join('')+'</div>'}
-function dok(inv){return '<a class="btn s k" style="text-decoration:none;display:inline-block" target="_blank" rel="noopener" href="'+B+'/dok/'+encodeURIComponent(inv)+'/inv">🧾 Invoice</a> <a class="btn s k" style="text-decoration:none;display:inline-block" target="_blank" rel="noopener" href="'+B+'/dok/'+encodeURIComponent(inv)+'/sj">🚚 Surat Jalan</a>'}
+function dok(inv){return '<a class="btn s k" style="text-decoration:none;display:inline-block" target="_blank" rel="noopener" href="'+B+'/dok/'+encodeURIComponent(inv)+'/inv">🧾 Invoice</a> <a class="btn s k" style="text-decoration:none;display:inline-block" target="_blank" rel="noopener" href="'+B+'/dok/'+encodeURIComponent(inv)+'/sj">🚚 Surat Jalan</a> <button class="btn s" style="background:var(--blu)" data-th="'+esc(inv)+'">📠 Thermal</button>'}
 function pill(k,telat){if(telat)return '<span class="pill p-telat">Lewat tempo</span>';return k=='belum'?'<span class="pill p-belum">Belum kontra bon</span>':k=='sudah'?'<span class="pill p-sudah">Sudah kontra bon</span>':'<span class="pill p-x">Tanpa kontra bon</span>'}
 
 function renderRingkasan(){const r=L.ringkas;let h='<h2>'+esc(L.bulan_label)+'</h2><div class="cards">'+
@@ -140,6 +140,7 @@ document.body.classList.toggle('printall',!!all);setTimeout(()=>{window.print();
 document.getElementById('pr1').onclick=()=>cetak(false);document.getElementById('prAll').onclick=()=>cetak(true);
 
 document.addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;
+if(b.dataset.th){cetakThermal(B+'/struk/'+encodeURIComponent(b.dataset.th),b);return}
 if(b.id=='kbSel'||b.id=='kbAll'){const v=b.id=='kbAll'?L.tagihan.filter(t=>t.kontra_bon=='belum').map(t=>t.invoice):[...document.querySelectorAll('.kbc:checked')].map(x=>x.value);if(!v.length){alert('Centang dulu invoice yang udah di-kontra bon.');return}
 if(!confirm('Tandai '+v.length+' invoice sudah kontra bon?'))return;b.disabled=true;const r=await (await fetch(B+'/kontrabon',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({invoices:v})})).json();alert(r.ok?'✅ '+r.n+' invoice ditandai sudah kontra bon.':'Gagal');loadLap()}
 if(b.dataset.lunas){if(!confirm('Tandai '+b.dataset.lunas+' ('+b.dataset.n+', '+rp(+b.dataset.j)+') LUNAS? Otomatis masuk Kas.'))return;b.disabled=true;const r=await (await fetch(B+'/lunas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({invoice:b.dataset.lunas})})).json();alert(r.ok?'✅ Lunas '+rp(r.total)+' & dicatat ke Kas.':(r.error||'Gagal'));loadLap()}

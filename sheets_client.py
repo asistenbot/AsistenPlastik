@@ -1354,7 +1354,17 @@ class SheetsClient:
             code = str(r["Item_Code"]).strip()
             ms = sorted(by_item.get(code.upper(), []), key=lambda m: str(m.get("Waktu", "")))
             hit = [m for m in ms if m.get("Jenis") == "Hitung"]
-            stok, t0 = None, ""
+            stok, t0, estimasi = None, "", False
+            masuk_aja = [m for m in ms if m.get("Jenis") in ("Masuk", "Penyesuaian")]
+            if not hit and masuk_aja:
+                # belum ada hitung awal, tapi udah ada barang masuk: hitung sementara
+                # dari barang masuk dikurangi penjualan SETELAH barang masuk pertama
+                estimasi = True
+                t0 = str(masuk_aja[0].get("Waktu", ""))
+                stok = sum(self._f(m.get("Qty")) for m in masuk_aja)
+                for o in ord_by.get(code.upper(), []):
+                    if str(o.get("Timestamp", "")) > t0:
+                        stok -= self._f(o.get("Qty"))
             if hit:
                 t0 = str(hit[-1].get("Waktu", ""))
                 stok = self._f(hit[-1].get("Qty"))
@@ -1376,7 +1386,8 @@ class SheetsClient:
             out.append({"code": code, "nama": r.get("Nama", "") + (
                         " - " + str(r.get("Deskripsi")) if str(r.get("Deskripsi", "")).strip() not in ("", "POLOS") else ""),
                         "kategori": r.get("Kategori", ""), "satuan": r.get("Satuan", ""),
-                        "isi_bal": self._f(r.get("Isi_Bal")), "min": mn, "stok": stok, "status": status})
+                        "isi_bal": self._f(r.get("Isi_Bal")), "min": mn, "stok": stok, "status": status,
+                        "estimasi": estimasi})
         return out
 
     def get_mutasi_recent(self, n=15):

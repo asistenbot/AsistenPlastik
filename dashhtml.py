@@ -147,7 +147,7 @@ if(b.dataset.b){if(!confirm(b.dataset.a=='1'?'Setujui pengajuan ini? Stok akan b
 if(b.dataset.q){b.disabled=true;await fetch(B+'/permintaan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:b.dataset.q,status:'Selesai'})});loadPend()}});
 
 /* ---------- stok & gudang ---------- */
-function stokTxt(i){if(i.stok===null)return '-';let t=fmt(i.stok)+' '+esc(i.satuan);if(i.isi_bal>0&&i.stok>=i.isi_bal)t+=' <small>('+(Math.round(i.stok/i.isi_bal*10)/10)+' bal)</small>';return t}
+function stokTxt(i){if(i.stok===null)return '-';let t=fmt(i.stok)+' '+esc(i.satuan)+(i.estimasi?' <small title="belum ada Hitung Stok awal">(sementara)</small>':'');if(i.isi_bal>0&&i.stok>=i.isi_bal)t+=' <small>('+(Math.round(i.stok/i.isi_bal*10)/10)+' bal)</small>';return t}
 const ORD={habis:0,menipis:1,belum:2,aman:3};
 function renderStok(){const q=document.getElementById('cari').value.toLowerCase();let X=D.filter(i=>(!F||i.status==F)&&(i.nama+' '+i.code+' '+i.kategori).toLowerCase().includes(q));
 X.sort((a,b)=>ORD[a.status]-ORD[b.status]||a.nama.localeCompare(b.nama));

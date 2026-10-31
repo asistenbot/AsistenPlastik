@@ -2486,9 +2486,14 @@ async def staffbaru_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @owner_only
 async def staffreset_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sid = context.args[0] if context.args else ""
-    pw = _sheets().reset_staff_password(sid) if sid else None
+    custom = context.args[1] if len(context.args) > 1 else None
+    if custom is not None and len(custom) < 6:
+        await update.effective_message.reply_text("Password minimal 6 karakter.")
+        return
+    pw = _sheets().reset_staff_password(sid, custom) if sid else None
     await update.effective_message.reply_text(
-        f"🔑 Password baru {sid}: {pw}" if pw else "Format: /staffreset <id>. ID gak ketemu." )
+        f"🔑 Password baru {sid}: {pw}" if pw else
+        "Format:\n/staffreset <id>  → password acak\n/staffreset <id> <passwordbaru>  → pilih sendiri\n(ID gak ketemu kalau salah ketik)")
 
 
 @owner_only

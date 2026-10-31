@@ -80,8 +80,10 @@ $('p').onkeydown=e=>{if(e.key=='Enter')$('b').click()}}
 function stokTxt(i){if(i.stok===null)return 'belum dihitung';let t=fmt(i.stok)+' '+i.satuan;if(i.isi_bal>0&&i.stok>=i.isi_bal)t+=' (±'+(Math.round(i.stok/i.isi_bal*10)/10)+' bal)';return t}
 async function boot(){const r=await api('data');if(r.status==401){loginView();return}D=r;ME=r.nama;shell()}
 const TABS=[['pesanan','🚚 Pesanan'],['masuk','📥 Barang Masuk'],['hitung','🧮 Hitung Stok'],['minta','🛒 Minta Barang'],['riwayat','🕘 Riwayat']];
-function shell(){$('app').innerHTML='<header><h1>📦 '+esc(ME)+'</h1><button id="out">Keluar</button></header><div class="tabs">'+TABS.map(t=>'<button data-t="'+t[0]+'" class="'+(t[0]==tab?'on':'')+'">'+t[1]+'</button>').join('')+'</div><main id="m"></main><div class="bar hide" id="bar"><div class="t" id="cnt"></div><button class="btn" id="go">Kirim</button></div>';
+function shell(){$('app').innerHTML='<header><h1>📦 '+esc(ME)+'</h1><button id="pw">Ganti password</button><button id="out">Keluar</button></header><div class="tabs">'+TABS.map(t=>'<button data-t="'+t[0]+'" class="'+(t[0]==tab?'on':'')+'">'+t[1]+'</button>').join('')+'</div><main id="m"></main><div class="bar hide" id="bar"><div class="t" id="cnt"></div><button class="btn" id="go">Kirim</button></div>';
 $('out').onclick=async()=>{await api('logout',{});loginView()};
+$('pw').onclick=async()=>{const lama=prompt('Password lama:');if(!lama)return;const baru=prompt('Password baru (minimal 6 karakter):');if(!baru)return;
+const r=await api('ganti',{lama,baru});alert(r.ok?'✅ Password diganti':(r.error||'Gagal'))};
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;for(const k in vals)delete vals[k];shell()});view()}
 function view(){const m=$('m');const bar=$('bar');bar.classList.add('hide');
 if(tab=='pesanan'){let h='<div class="info">Pesanan customer yang harus disiapkan. Setelah barang keluar gudang, tekan <b>Sudah dikirim</b>.</div>';
@@ -235,6 +237,21 @@ def add_staff_routes(app, sheets_getter, notify):
             logger.exception("gagal notif kirim")
         return web.json_response({"ok": True})
 
+    async def ganti(request):
+        st = await _auth(request)
+        if not st:
+            return web.json_response({"ok": False, "error": "Login dulu"}, status=401)
+        body = await request.json()
+        baru = str(body.get("baru", ""))
+        if len(baru) < 6 or len(baru) > 60:
+            return web.json_response({"ok": False, "error": "Password baru minimal 6 karakter"}, status=400)
+        sheets = sheets_getter()
+        if not await asyncio.to_thread(sheets.verify_staff, st["id"], str(body.get("lama", ""))):
+            return web.json_response({"ok": False, "error": "Password lama salah"}, status=400)
+        await asyncio.to_thread(sheets.reset_staff_password, st["id"], baru)
+        return web.json_response({"ok": True})
+
+    app.router.add_post("/staff/api/ganti", ganti)
     app.router.add_get("/staff", page)
     app.router.add_post("/staff/api/login", login)
     app.router.add_post("/staff/api/logout", logout)

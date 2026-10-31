@@ -1410,13 +1410,14 @@ class SheetsClient:
             [sid, nama, self._hash_pw(pw, salt), salt, "YA", _now_str()], value_input_option="RAW")
         return sid, pw
 
-    def reset_staff_password(self, sid):
+    def reset_staff_password(self, sid, pw=None):
+        """pw=None -> bikin acak. Balikin password baru, atau None kalau ID gak ada."""
         import secrets
         ws = self._ws(config.SHEET_STAFF)
         for i, row in enumerate(ws.get_all_values()[1:], start=2):
             if row and row[0].lower() == sid.lower():
                 alfabet = "abcdefghjkmnpqrstuvwxyz23456789"
-                pw = "".join(secrets.choice(alfabet) for _ in range(8))
+                pw = pw or "".join(secrets.choice(alfabet) for _ in range(8))
                 salt = secrets.token_hex(8)
                 ws.batch_update([{"range": f"C{i}:D{i}", "values": [[self._hash_pw(pw, salt), salt]]}])
                 return pw

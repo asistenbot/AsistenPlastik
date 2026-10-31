@@ -183,6 +183,30 @@ def hitung_laporan(sheets, bulan=None):
         pass
     pernah = [s for s in stok if s.get("status") in ("habis", "menipis")]
 
+    # ---- order web yang belum di-approve + invoice yang belum dikirim ----
+    import json as _json
+    web_menunggu = []
+    try:
+        for r in sheets._records(sheets._ws(config.SHEET_PESANANWEB)):
+            if str(r.get("Status", "")) != "Menunggu":
+                continue
+            try:
+                n_item = len((_json.loads(r.get("Payload") or "{}")).get("items") or [])
+            except ValueError:
+                n_item = 0
+            web_menunggu.append({"id": str(r.get("ID", "")), "waktu": str(r.get("Waktu", ""))[:16],
+                                 "nama": str(r.get("Nama", "")), "n_item": n_item})
+    except Exception:
+        pass
+    belum_kirim = []
+    try:
+        for d in sheets.get_orders_gudang(300):
+            if not d["dikirim"]:
+                belum_kirim.append({"invoice": d["invoice"], "customer": d["customer"], "tgl": d["tgl"],
+                                    "kirim": d["kirim"], "n_item": len(d["items"])})
+    except Exception:
+        pass
+
     total_piutang = sum(t["total"] for t in tagihan)
     ringkas = {
         "omzet": omzet, "jml_invoice": len(bln), "lunas": lunas_bln, "belum_lunas": omzet - lunas_bln,
@@ -194,7 +218,7 @@ def hitung_laporan(sheets, bulan=None):
         "total_utang": sum(utang.values()), "jml_po_terbuka": len(po_list),
         "po_telat": sum(1 for o in po_list if o["telat"]),
         "kas_masuk": lap["total_masuk"], "kas_keluar": lap["total_keluar"], "kas_laba": lap["laba"],
-        "saldo_kas": saldo_kas,
+        "saldo_kas": saldo_kas, "web_menunggu": len(web_menunggu), "belum_kirim": len(belum_kirim),
         "stok_habis": sum(1 for s in stok if s.get("status") == "habis"),
         "stok_menipis": sum(1 for s in stok if s.get("status") == "menipis"),
     }
@@ -213,5 +237,5 @@ def hitung_laporan(sheets, bulan=None):
         "utang_supplier": [{"nama": k, "total": v} for k, v in _top(utang, 20)],
         "kas_masuk_kat": [{"nama": k, "total": v} for k, v in _top(lap["masuk_by_kategori"])],
         "kas_keluar_kat": [{"nama": k, "total": v} for k, v in _top(lap["keluar_by_kategori"])],
-        "kas_list": kas_list, "stok_bermasalah": len(pernah),
+        "kas_list": kas_list, "web_list": web_menunggu, "belum_kirim_list": belum_kirim[:40], "stok_bermasalah": len(pernah),
     }

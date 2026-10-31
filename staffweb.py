@@ -87,7 +87,7 @@ const r=await api('ganti',{lama,baru});alert(r.ok?'✅ Password diganti':(r.erro
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;for(const k in vals)delete vals[k];shell()});view()}
 function view(){const m=$('m');const bar=$('bar');bar.classList.add('hide');
 if(tab=='pesanan'){let h='<div class="info">Pesanan customer yang harus disiapkan. Setelah barang keluar gudang, tekan <b>Sudah dikirim</b>.</div>';
-D.orders.forEach(o=>{h+='<div class="card"><b>'+esc(o.customer)+' <span class="badge '+(o.dikirim?'Dikirim':'Menunggu')+'">'+(o.dikirim?'Dikirim':'Belum dikirim')+'</span></b><small>'+esc(o.invoice)+' • '+esc(o.tgl)+(o.kirim?' • kirim '+esc(o.kirim):'')+' • '+esc(o.metode)+'</small><div style="margin:6px 0">'+o.items.map(i=>'• '+esc(i.nama)+' — <b>'+esc(i.qty)+' '+esc(i.satuan)+'</b>').join('<br>')+'</div>'+(o.alamat?'<small>📍 '+esc(o.alamat)+'</small><br>':'')+(o.dikirim?'<small>oleh '+esc(o.dikirim_oleh)+' • '+esc(o.dikirim_waktu)+'</small>':'<button class="btn sm" data-k="'+esc(o.invoice)+'">✅ Sudah dikirim</button>')+'</div>'});
+D.orders.forEach(o=>{h+='<div class="card"><b>'+esc(o.customer)+' <span class="badge '+(o.dikirim?'Dikirim':'Menunggu')+'">'+(o.dikirim?'Dikirim':'Belum dikirim')+'</span></b><small>'+esc(o.invoice)+' • '+esc(o.tgl)+(o.kirim?' • kirim '+esc(o.kirim):'')+' • '+esc(o.metode)+'</small><div style="margin:6px 0">'+o.items.map(i=>'• '+esc(i.nama)+' — <b>'+esc(i.qty)+' '+esc(i.satuan)+'</b>').join('<br>')+'</div>'+(o.alamat?'<small>📍 '+esc(o.alamat)+'</small><br>':'')+(o.dikirim?'<small>oleh '+esc(o.dikirim_oleh)+' • '+esc(o.dikirim_waktu)+'</small>':'<button class="btn sm" data-k="'+esc(o.invoice)+'">✅ Sudah dikirim</button>')+' <a class="btn sm" style="text-decoration:none;display:inline-block;background:#555;color:#fff" target="_blank" rel="noopener" href="/staff/api/dok/'+encodeURIComponent(o.invoice)+'">🖨️ Surat Jalan</a></div>'});
 m.innerHTML=h||'<p>Belum ada pesanan.</p>';m.querySelectorAll('[data-k]').forEach(b=>b.onclick=async()=>{if(!confirm('Barang untuk '+b.dataset.k+' sudah keluar & dikirim?'))return;b.disabled=true;const r=await api('kirim',{invoice:b.dataset.k});if(r.ok)boot();else alert(r.error||'Gagal')});return}
 if(tab=='riwayat'){let h='<div class="info">Pengajuan stok kamu. <b>Menunggu</b> = belum disetujui owner.</div>';
 const by={};D.pengajuan.forEach(p=>{(by[p.Batch]=by[p.Batch]||[]).push(p)});Object.keys(by).reverse().forEach(b=>{const L=by[b];h+='<div class="card"><b>'+esc(L[0].Jenis=='Masuk'?'Barang Masuk':'Hitung Stok')+' <span class="badge '+esc(L[0].Status)+'">'+esc(L[0].Status)+'</span></b><small>'+esc(L[0].Waktu)+(L[0].Ref?' • '+esc(L[0].Ref):'')+'</small><div style="margin-top:5px">'+L.map(p=>'• '+esc(p.Nama)+': <b>'+esc(p.Qty)+' '+esc(p.Satuan)+'</b>').join('<br>')+'</div></div>'});
@@ -251,6 +251,18 @@ def add_staff_routes(app, sheets_getter, notify):
         await asyncio.to_thread(sheets.reset_staff_password, st["id"], baru)
         return web.json_response({"ok": True})
 
+    async def dok_sj(request):
+        if not await _auth(request):
+            return web.Response(status=401, text="Login dulu.")
+        from docbuild import bangun_pdf
+        hasil = await asyncio.to_thread(bangun_pdf, sheets_getter(), request.match_info["inv"], "sj")
+        if not hasil:
+            return web.Response(status=404, text="Invoice tidak ketemu.")
+        nama, data = hasil
+        return web.Response(body=data, content_type="application/pdf",
+                            headers={"Content-Disposition": f'inline; filename="{nama}"'})
+
+    app.router.add_get("/staff/api/dok/{inv}", dok_sj)
     app.router.add_post("/staff/api/ganti", ganti)
     app.router.add_get("/staff", page)
     app.router.add_post("/staff/api/login", login)

@@ -244,6 +244,21 @@ def add_stok_routes(app, sheets_getter):
         await asyncio.to_thread(sheets.add_kas_entry, "Masuk", "Penjualan", total, keterangan=f"Pelunasan {inv}", ref=inv)
         return web.json_response({"ok": True, "total": total})
 
+    async def dokumen(request):
+        if not await _link(request, ("@owner",)):
+            return web.Response(status=404, text="Link tidak valid.")
+        kind = request.match_info["kind"]
+        if kind not in ("inv", "sj"):
+            return web.Response(status=404, text="Jenis dokumen salah.")
+        from docbuild import bangun_pdf
+        hasil = await asyncio.to_thread(bangun_pdf, sheets_getter(), request.match_info["inv"], kind)
+        if not hasil:
+            return web.Response(status=404, text="Invoice tidak ketemu.")
+        nama, data = hasil
+        return web.Response(body=data, content_type="application/pdf",
+                            headers={"Content-Disposition": f'inline; filename="{nama}"'})
+
+    app.router.add_get("/dashboard/{token}/dok/{inv}/{kind}", dokumen)
     app.router.add_get("/dashboard/{token}/laporan", laporan)
     app.router.add_post("/dashboard/{token}/kontrabon", kontrabon)
     app.router.add_post("/dashboard/{token}/lunas", lunas)

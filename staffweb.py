@@ -65,13 +65,14 @@ input,select,textarea{width:100%;padding:11px;border:1px solid var(--ln);border-
 .badge{display:inline-block;font-size:12px;padding:2px 8px;border-radius:10px;margin-left:6px}
 .menipis,.Menunggu,.Baru{background:#fff0c9;color:#7a5a00}.habis,.Ditolak{background:#ffd9d6;color:#9a1b12}.aman,.Disetujui,.Dikirim,.Selesai{background:#d9f3e4;color:#14633a}.belum{background:#e8e8e8;color:#555}
 .it{margin:10px 0;padding-bottom:10px;border-bottom:1px solid var(--ln)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0}.chip{border:1px solid var(--ln);background:#fff;border-radius:18px;padding:8px 12px;font:inherit;font-size:14px}.chip.on{background:var(--g);color:#fff;border-color:var(--g)}.chip small{opacity:.8}.lnk{background:none;border:0;color:var(--g);padding:4px 0;font:inherit;font-size:13px;text-decoration:underline}
 .hide{display:none}.err{color:#b3261e;font-size:14px;min-height:20px}
 </style></head><body>
 <div id="app"></div>
 <script>
 const $=id=>document.getElementById(id);const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=n=>(Math.round(n*100)/100).toLocaleString('id-ID');
-let ME=null,D=null,tab='po';const vals={};let poSel=null,poV={};
+let ME=null,D=null,tab='po';const vals={};let poSel=null,poV={},poOpen={};
 async function api(path,body){const r=await fetch('/staff/api/'+path,body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{});
 let j={};try{j=await r.json()}catch(_){}return{status:r.status,...j}}
 function loginView(msg){$('app').innerHTML='<div class="login"><h2>📦 Panel Gudang</h2><p class="mu">__BIZ__</p><label>ID</label><input id="u" autocapitalize="none" autocomplete="username"><label>Password</label><input id="p" type="password" autocomplete="current-password"><div class="err" id="e">'+esc(msg||'')+'</div><button class="btn" id="b">Masuk</button></div>';
@@ -90,20 +91,27 @@ if(tab=='po'){const P=D.po||[];
 if(!poSel){let h='<div class="info">PO ke supplier yang barangnya belum dicek. Pilih PO, cek jumlah barang yang datang, lalu kirim ke owner.</div>';
 P.forEach(p=>{const w=p.status_terima=='Menunggu';h+='<div class="card"><b>'+esc(p.po)+' — '+esc(p.supplier)+' <span class="badge '+(w?'Menunggu':'Baru')+'">'+(w?'Menunggu owner':'Belum dicek')+'</span></b><small>'+esc(p.tgl)+' • '+p.items.length+' macam barang</small><div style="margin:6px 0">'+p.items.map(i=>'• '+esc(i.nama)+' — <b>'+fmt(i.qty)+' '+esc(i.satuan)+'</b>').join('<br>')+'</div>'+(w?'<small>Sudah kamu kirim, tinggal disetujui owner.</small>':'<button class="btn sm" data-po="'+esc(p.po)+'">✅ Cek barang PO ini</button>')+'</div>'});
 m.innerHTML=h+(P.length?'':'<p>Gak ada PO yang perlu dicek 🎉</p>');
-m.querySelectorAll('[data-po]').forEach(b=>b.onclick=()=>{poSel=b.dataset.po;poV={};const p=P.find(x=>x.po==poSel);p.items.forEach((it,i)=>{poV[i]={q:String(it.qty),code:it.code}});view()});return}
+m.querySelectorAll('[data-po]').forEach(b=>b.onclick=()=>{poSel=b.dataset.po;poV={};const p=P.find(x=>x.po==poSel);poOpen={};p.items.forEach((it,i)=>{poV[i]={q:String(it.qty),code:it.code}});view()});return}
 const p=P.find(x=>x.po==poSel);if(!p){poSel=null;view();return}
 let h='<button class="btn sm" id="bk" style="background:#555;margin-bottom:8px">← Kembali</button><div class="info"><b>'+esc(p.po)+' — '+esc(p.supplier)+'</b><br>Jumlah sudah keisi sesuai PO. <b>Ubah kalau yang datang beda</b> (kurang/lebih), isi 0 kalau gak datang.</div><button class="btn sm" id="sesuai" style="margin-bottom:6px">Semua sesuai PO</button><div id="lst"></div><input id="cat" placeholder="Catatan (misal: 2 bal sobek / kurang kirim)">';
 m.innerHTML=h;
 const draw=()=>{$('lst').innerHTML=p.items.map((it,i)=>{const v=poV[i];const opts=D.items.map(x=>'<option value="'+esc(x.code)+'"'+(v.code==x.code?' selected':'')+'>'+esc(x.nama)+'</option>').join('');
-const unmatched=!it.code;const row=D.items.find(x=>x.code==v.code);const unit=unmatched?(row?row.satuan:''):(it.unit=='bal'?'bal':it.satuan_stok);
-return '<div class="it"><b>'+esc(it.nama)+'</b><small class="mu">Dipesan: '+fmt(it.qty)+' '+esc(it.satuan)+'</small>'+(unmatched?'<select data-s="'+i+'"><option value="">— pilih barang yang cocok di katalog —</option>'+opts+'</select>':'')+'<div class="row"><input inputmode="decimal" data-q="'+i+'" value="'+esc(v.q)+'"><div style="flex:1;align-self:center">'+esc(unit)+'</div></div></div>'}).join('');upd()};
+const row=D.items.find(x=>x.code==v.code);const unmatched=!v.code;const unit=unitFor(it,v.code)=='bal'?'bal':(row?row.satuan:it.satuan_stok);
+const chips=(it.kandidat||[]).map(k=>'<button class="chip'+(v.code==k.code?' on':'')+'" data-i="'+i+'" data-k="'+esc(k.code)+'">'+esc(k.nama)+' <small>('+esc(k.satuan)+')</small></button>').join('');
+const cur=row?'<button class="chip on" data-i="'+i+'" data-k="'+esc(row.code)+'">'+esc(row.nama)+' <small>('+esc(row.satuan)+')</small></button>':'';
+const open=unmatched||poOpen[i];
+return '<div class="it"><b>'+esc(it.nama)+(unmatched?' <span class="badge Ditolak">pilih dulu</span>':' <span class="badge Disetujui">cocok</span>')+'</b><small class="mu">Dipesan: '+fmt(it.qty)+' '+esc(it.satuan)+'</small>'+
+(open?'<div class="mu" style="margin:6px 0 2px">'+(unmatched?'Yang mana barangnya? Tap salah satu:':'Tap kalau ukurannya/jenisnya beda:')+'</div><div class="chips">'+cur+chips+'</div><select data-s="'+i+'"><option value="">— atau cari di semua barang —</option>'+opts+'</select>':'<button class="lnk" data-o="'+i+'">bukan ini? ganti ukuran/jenis</button>')+'<div class="row"><input inputmode="decimal" data-q="'+i+'" value="'+esc(v.q)+'"><div style="flex:1;align-self:center">'+esc(unit)+'</div></div></div>'}).join('');upd()};
+const unitFor=(it,code)=>{const x=D.items.find(y=>y.code==code);return(code&&x&&x.isi_bal>0&&String(it.satuan).toLowerCase()=='bal')?'bal':'sat'};
+const nBelum=()=>p.items.filter((it,i)=>!poV[i].code&&parseFloat(String(poV[i].q).replace(',','.'))!=0).length;
 const ok=()=>p.items.every((it,i)=>{const v=poV[i];return v.q!==''&&!isNaN(parseFloat(String(v.q).replace(',','.')))&&(parseFloat(String(v.q).replace(',','.'))==0||v.code)});
-const upd=()=>{$('cnt').textContent=p.items.length+' macam barang';$('go').disabled=!ok()};
+const upd=()=>{const nb=nBelum();$('cnt').innerHTML=nb?'<b style="color:#b3261e">'+nb+' barang belum dipilih</b>':p.items.length+' macam barang';$('go').disabled=!ok()};
 bar.classList.remove('hide');$('go').textContent='Kirim ke owner';draw();
-$('bk').onclick=()=>{poSel=null;view()};$('sesuai').onclick=()=>{p.items.forEach((it,i)=>{poV[i].q=String(it.qty)});draw()};
+$('bk').onclick=()=>{poSel=null;view()};$('sesuai').onclick=()=>{p.items.forEach((it,i)=>{poV[i].q=String(it.qty)});draw();const t=$('sesuai');t.textContent='✓ Jumlah sudah sesuai PO';setTimeout(()=>t.textContent='Semua sesuai PO',1500)};
+$('lst').addEventListener('click',e=>{const c=e.target.closest('button');if(!c)return;if(c.dataset.k!==undefined){poV[c.dataset.i].code=c.dataset.k;draw()}else if(c.dataset.o!==undefined){poOpen[c.dataset.o]=true;draw()}});
 $('lst').addEventListener('input',e=>{const i=e.target.dataset.q;if(i!==undefined){poV[i].q=e.target.value;upd()}});
 $('lst').addEventListener('change',e=>{const i=e.target.dataset.s;if(i!==undefined){poV[i].code=e.target.value;draw()}});
-$('go').onclick=async()=>{if(!confirm('Kirim hasil cek PO '+p.po+' ke owner?'))return;const entries=p.items.map((it,i)=>({code:poV[i].code,qty:parseFloat(String(poV[i].q).replace(',','.')),unit:(it.code&&it.unit=='bal')?'bal':'sat',nama:it.nama}));
+$('go').onclick=async()=>{if(!confirm('Kirim hasil cek PO '+p.po+' ke owner?'))return;const entries=p.items.map((it,i)=>({code:poV[i].code,qty:parseFloat(String(poV[i].q).replace(',','.')),unit:unitFor(it,poV[i].code),nama:it.nama}));
 $('go').disabled=true;const r=await api('terimapo',{po:p.po,catatan:$('cat').value,entries});
 if(r.ok){alert('✅ Terkirim ke owner, nunggu disetujui');poSel=null;tab='riwayat';await boot()}else{alert(r.error||'Gagal');$('go').disabled=false}};return}
 if(tab=='pesanan'){let h='<div class="info">Pesanan customer yang harus disiapkan. Setelah barang keluar gudang, tekan <b>Sudah dikirim</b>.</div>';

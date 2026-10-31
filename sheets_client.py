@@ -1537,6 +1537,32 @@ class SheetsClient:
                 return p
         return None
 
+    def _kandidat(self, nama_item, produk, cocok=None, n=6):
+        """Produk PriceList yang mirip nama barang di PO (buat pilihan staff)."""
+        import difflib
+        q = _norm(nama_item)
+        qt = set(str(nama_item).lower().replace("(", " ").replace(")", " ").replace("x", " x ").split())
+        skor = []
+        for p in produk:
+            lab = self._label_produk(p)
+            sc_ = difflib.SequenceMatcher(None, q, _norm(lab)).ratio()
+            pt = set(lab.lower().replace("(", " ").replace(")", " ").replace("x", " x ").split())
+            if qt and pt:
+                sc_ += 0.5 * len(qt & pt) / max(len(qt), 1)
+            skor.append((sc_, p))
+        skor.sort(key=lambda x: -x[0])
+        out = []
+        for sc_, p in skor:
+            if cocok is not None and str(p["Item_Code"]) == str(cocok["Item_Code"]):
+                continue
+            if sc_ < 0.45 and len(out) >= 2:
+                break
+            out.append({"code": str(p["Item_Code"]).strip(), "nama": self._label_produk(p),
+                        "satuan": str(p.get("Satuan", "") or "")})
+            if len(out) >= n:
+                break
+        return out
+
     def _po_terbuka_rows(self):
         return [r for r in self.get_all_pos() if str(r.get("Status", "")) != "Batal" and str(r.get("No_PO", "")).strip()]
 
@@ -1570,6 +1596,7 @@ class SheetsClient:
                 isi = 0.0
             unit = "bal" if (p and isi > 0 and sat.strip().lower() == "bal") else "sat"
             d["items"].append({"nama": str(r.get("Item", "")), "qty": qty, "satuan": sat,
+                               "kandidat": self._kandidat(r.get("Item", ""), produk, p),
                                "code": str(p["Item_Code"]).strip() if p else "", "unit": unit,
                                "satuan_stok": str((p or {}).get("Satuan", "") or sat)})
         out = []

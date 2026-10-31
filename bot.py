@@ -652,7 +652,11 @@ async def topik_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def error_handler(update, context: ContextTypes.DEFAULT_TYPE):
-    from telegram.error import NetworkError, TimedOut, RetryAfter
+    from telegram.error import NetworkError, TimedOut, RetryAfter, Conflict
+    if isinstance(context.error, Conflict):
+        # 2 instance bot nyala barengan beberapa menit pas Railway deploy versi baru -- normal, ilang sendiri
+        logger.warning("Conflict getUpdates (biasanya cuma pas deploy): %s", context.error)
+        return
     if isinstance(context.error, (NetworkError, TimedOut, RetryAfter)):
         # gangguan koneksi sesaat ke Telegram: library otomatis nyoba lagi, gak perlu ganggu admin
         logger.warning("gangguan jaringan sesaat ke Telegram: %s", context.error)

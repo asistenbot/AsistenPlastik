@@ -151,6 +151,7 @@ WEB_PORT = int(os.getenv("PORT") or 8080)
 SHEET_STAFF = "Staff"
 SHEET_PENGAJUAN = "PengajuanStok"
 SHEET_PERMINTAAN = "PermintaanBarang"
+SHEET_PENERIMAAN = "PenerimaanPO"
 SHEET_PENGIRIMAN = "PengirimanOrder"
 import hashlib as _hl
 WEB_SECRET = os.getenv("WEB_SECRET") or _hl.sha256(((TELEGRAM_BOT_TOKEN or "dev") + "|web").encode()).hexdigest()

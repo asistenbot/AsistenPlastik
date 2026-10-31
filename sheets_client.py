@@ -65,6 +65,7 @@ SCHEMA = {
     config.SHEET_STAFF: ["ID", "Nama", "Hash", "Salt", "Aktif", "Dibuat"],
     config.SHEET_PENGAJUAN: ["ID", "Batch", "Waktu", "Staff", "Jenis", "Item_Code", "Nama", "Qty", "Satuan",
                              "Ref", "Status", "Diputuskan_Oleh", "Diputuskan_Waktu"],
+    config.SHEET_PENERIMAAN: ["No_PO", "Status", "Batch", "Staff", "Waktu", "Catatan"],
     config.SHEET_PERMINTAAN: ["ID", "Waktu", "Staff", "Item_Code", "Nama", "Qty", "Satuan", "Catatan", "Status"],
     config.SHEET_PENGIRIMAN: ["No_Invoice", "Status", "Staff", "Waktu"],
     config.SHEET_LINKORDER: ["Token", "Nama_Customer", "Aktif", "Dibuat", "Catatan"],
@@ -1509,7 +1510,119 @@ class SheetsClient:
         if approve:
             self.add_mutasi(entries)
         ws.batch_update(data)
+        try:
+            ref0 = str(entries[0].get("ref", ""))
+            if ref0.upper().startswith(config.PO_PREFIX):
+                self.set_penerimaan_status(batch, "Diterima" if approve else "Ditolak")
+        except Exception:
+            logger.exception("gagal update status penerimaan PO")
         return len(entries)
+
+    # ---------------- TERIMA PO (staff cek barang datang) ----------------
+
+    @staticmethod
+    def _label_produk(p):
+        """Sama persis dengan label di PO (Nama + (Deskripsi) kalau bukan POLOS)."""
+        nama = str(p.get("Nama", "") or "")
+        d = str(p.get("Deskripsi", "") or "").strip()
+        return f"{nama} ({d})" if d and d.upper() != "POLOS" else nama
+
+    def _cocok_produk(self, nama_item, produk):
+        n = _norm(nama_item)
+        for p in produk:
+            if _norm(self._label_produk(p)) == n:
+                return p
+        for p in produk:
+            if _norm(p.get("Nama", "")) == n:
+                return p
+        return None
+
+    def _po_terbuka_rows(self):
+        return [r for r in self.get_all_pos() if str(r.get("Status", "")) != "Batal" and str(r.get("No_PO", "")).strip()]
+
+    def get_penerimaan_map(self):
+        """{no_po: baris terakhir yang statusnya BUKAN Ditolak} -> Menunggu / Diterima."""
+        out = {}
+        for r in self._records(self._ws(config.SHEET_PENERIMAAN)):
+            if str(r.get("Status", "")) == "Ditolak":
+                continue
+            out[str(r.get("No_PO", ""))] = r
+        return out
+
+    def get_po_untuk_terima(self, hanya_belum=True, limit=40):
+        """PO + item (dicocokin ke PriceList) buat dicek staff gudang."""
+        produk = [p for p in self.get_price_list() if str(p.get("Item_Code", "")).strip()]
+        terima = self.get_penerimaan_map()
+        by = {}
+        for r in self._po_terbuka_rows():
+            no = str(r["No_PO"]).strip()
+            d = by.setdefault(no, {"po": no, "supplier": str(r.get("Nama_Supplier", "")),
+                                   "tgl": str(r.get("Timestamp", ""))[:10], "items": []})
+            p = self._cocok_produk(r.get("Item", ""), produk)
+            try:
+                qty = float(r.get("Qty") or 0)
+            except (TypeError, ValueError):
+                qty = 0.0
+            sat = str(r.get("Satuan", "") or "")
+            try:
+                isi = float((p or {}).get("Isi_Bal") or 0)
+            except (TypeError, ValueError):
+                isi = 0.0
+            unit = "bal" if (p and isi > 0 and sat.strip().lower() == "bal") else "sat"
+            d["items"].append({"nama": str(r.get("Item", "")), "qty": qty, "satuan": sat,
+                               "code": str(p["Item_Code"]).strip() if p else "", "unit": unit,
+                               "satuan_stok": str((p or {}).get("Satuan", "") or sat)})
+        out = []
+        for d in sorted(by.values(), key=lambda d: d["po"], reverse=True):
+            t = terima.get(d["po"])
+            d["status_terima"] = str(t.get("Status", "")) if t else ""
+            if hanya_belum and d["status_terima"] == "Diterima":
+                continue
+            out.append(d)
+        return out[:limit]
+
+    def add_penerimaan(self, no_po, batch, staff, catatan=""):
+        self._ws(config.SHEET_PENERIMAAN).append_row(
+            [no_po, "Menunggu", batch, staff, _now_str(), catatan], value_input_option="RAW")
+
+    def set_penerimaan_status(self, batch, status):
+        ws = self._ws(config.SHEET_PENERIMAAN)
+        for i, row in enumerate(ws.get_all_values()[1:], start=2):
+            if len(row) > 2 and row[2] == batch:
+                ws.batch_update([{"range": f"B{i}", "values": [[status]]}])
+                return True
+        return False
+
+    def po_banding(self, no_po, diterima):
+        """Bandingin PO vs yang diterima. diterima: {item_code: qty_satuan_stok}.
+        Balikin list {nama, pesan, terima, satuan, selisih} (satuan stok)."""
+        produk = [p for p in self.get_price_list() if str(p.get("Item_Code", "")).strip()]
+        out, dipakai = [], set()
+        for r in self._po_terbuka_rows():
+            if str(r["No_PO"]).strip() != no_po:
+                continue
+            p = self._cocok_produk(r.get("Item", ""), produk)
+            try:
+                qty = float(r.get("Qty") or 0)
+            except (TypeError, ValueError):
+                qty = 0.0
+            sat = str(r.get("Satuan", "") or "")
+            code = str(p["Item_Code"]).strip().upper() if p else ""
+            try:
+                isi = float((p or {}).get("Isi_Bal") or 0)
+            except (TypeError, ValueError):
+                isi = 0.0
+            if p and isi > 0 and sat.strip().lower() == "bal":
+                qty, sat = qty * isi, str(p.get("Satuan", "") or sat)
+            got = float(diterima.get(code, 0)) if code else 0.0
+            if code:
+                dipakai.add(code)
+            out.append({"nama": str(r.get("Item", "")), "pesan": qty, "terima": got, "satuan": sat,
+                        "selisih": got - qty})
+        for code, got in diterima.items():
+            if code not in dipakai:
+                out.append({"nama": code, "pesan": 0, "terima": got, "satuan": "", "selisih": got})
+        return out
 
     # permintaan barang (staff minta owner order)
     def add_permintaan(self, staff, entries):

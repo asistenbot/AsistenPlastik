@@ -48,7 +48,7 @@ STAFF_HTML = """<!doctype html><html lang="id"><head><meta charset="utf-8">
 header{background:var(--g);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px}header h1{margin:0;font-size:18px;flex:1}
 header button{background:rgba(255,255,255,.2);color:#fff;border:0;border-radius:8px;padding:6px 10px}
 .tabs{display:flex;background:#fff;border-bottom:1px solid var(--ln);position:sticky;top:0;z-index:5;overflow-x:auto}
-.tabs button{flex:1;min-width:84px;padding:11px 6px;border:0;background:none;font-size:14px;font-weight:600;color:var(--mu);border-bottom:3px solid transparent;white-space:nowrap}
+.tabs button{flex:0 0 auto;padding:11px 12px;border:0;background:none;font-size:14px;font-weight:600;color:var(--mu);border-bottom:3px solid transparent;white-space:nowrap}
 .tabs button.on{color:var(--g);border-color:var(--g)}
 main{max-width:720px;margin:0 auto;padding:10px 12px 120px}
 .login{max-width:360px;margin:60px auto;background:#fff;border:1px solid var(--ln);border-radius:14px;padding:22px}
@@ -71,7 +71,7 @@ input,select,textarea{width:100%;padding:11px;border:1px solid var(--ln);border-
 <script>
 const $=id=>document.getElementById(id);const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=n=>(Math.round(n*100)/100).toLocaleString('id-ID');
-let ME=null,D=null,tab='pesanan';const vals={};
+let ME=null,D=null,tab='po';const vals={};let poSel=null,poV={};
 async function api(path,body){const r=await fetch('/staff/api/'+path,body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{});
 let j={};try{j=await r.json()}catch(_){}return{status:r.status,...j}}
 function loginView(msg){$('app').innerHTML='<div class="login"><h2>📦 Panel Gudang</h2><p class="mu">__BIZ__</p><label>ID</label><input id="u" autocapitalize="none" autocomplete="username"><label>Password</label><input id="p" type="password" autocomplete="current-password"><div class="err" id="e">'+esc(msg||'')+'</div><button class="btn" id="b">Masuk</button></div>';
@@ -79,13 +79,33 @@ $('b').onclick=async()=>{$('b').disabled=true;const r=await api('login',{id:$('u
 $('p').onkeydown=e=>{if(e.key=='Enter')$('b').click()}}
 function stokTxt(i){if(i.stok===null)return 'belum dihitung';let t=fmt(i.stok)+' '+i.satuan;if(i.isi_bal>0&&i.stok>=i.isi_bal)t+=' (±'+(Math.round(i.stok/i.isi_bal*10)/10)+' bal)';return t}
 async function boot(){const r=await api('data');if(r.status==401){loginView();return}D=r;ME=r.nama;shell()}
-const TABS=[['pesanan','🚚 Pesanan'],['masuk','📥 Barang Masuk'],['hitung','🧮 Hitung Stok'],['minta','🛒 Minta Barang'],['riwayat','🕘 Riwayat']];
+const TABS=[['po','📋 Terima PO'],['pesanan','🚚 Pesanan'],['masuk','📥 Barang Masuk'],['hitung','🧮 Hitung Stok'],['minta','🛒 Minta Barang'],['riwayat','🕘 Riwayat']];
 function shell(){$('app').innerHTML='<header><h1>📦 '+esc(ME)+'</h1><button id="pw">Ganti password</button><button id="out">Keluar</button></header><div class="tabs">'+TABS.map(t=>'<button data-t="'+t[0]+'" class="'+(t[0]==tab?'on':'')+'">'+t[1]+'</button>').join('')+'</div><main id="m"></main><div class="bar hide" id="bar"><div class="t" id="cnt"></div><button class="btn" id="go">Kirim</button></div>';
 $('out').onclick=async()=>{await api('logout',{});loginView()};
 $('pw').onclick=async()=>{const lama=prompt('Password lama:');if(!lama)return;const baru=prompt('Password baru (minimal 6 karakter):');if(!baru)return;
 const r=await api('ganti',{lama,baru});alert(r.ok?'✅ Password diganti':(r.error||'Gagal'))};
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;for(const k in vals)delete vals[k];shell()});view()}
 function view(){const m=$('m');const bar=$('bar');bar.classList.add('hide');
+if(tab=='po'){const P=D.po||[];
+if(!poSel){let h='<div class="info">PO ke supplier yang barangnya belum dicek. Pilih PO, cek jumlah barang yang datang, lalu kirim ke owner.</div>';
+P.forEach(p=>{const w=p.status_terima=='Menunggu';h+='<div class="card"><b>'+esc(p.po)+' — '+esc(p.supplier)+' <span class="badge '+(w?'Menunggu':'Baru')+'">'+(w?'Menunggu owner':'Belum dicek')+'</span></b><small>'+esc(p.tgl)+' • '+p.items.length+' macam barang</small><div style="margin:6px 0">'+p.items.map(i=>'• '+esc(i.nama)+' — <b>'+fmt(i.qty)+' '+esc(i.satuan)+'</b>').join('<br>')+'</div>'+(w?'<small>Sudah kamu kirim, tinggal disetujui owner.</small>':'<button class="btn sm" data-po="'+esc(p.po)+'">✅ Cek barang PO ini</button>')+'</div>'});
+m.innerHTML=h+(P.length?'':'<p>Gak ada PO yang perlu dicek 🎉</p>');
+m.querySelectorAll('[data-po]').forEach(b=>b.onclick=()=>{poSel=b.dataset.po;poV={};const p=P.find(x=>x.po==poSel);p.items.forEach((it,i)=>{poV[i]={q:String(it.qty),code:it.code}});view()});return}
+const p=P.find(x=>x.po==poSel);if(!p){poSel=null;view();return}
+let h='<button class="btn sm" id="bk" style="background:#555;margin-bottom:8px">← Kembali</button><div class="info"><b>'+esc(p.po)+' — '+esc(p.supplier)+'</b><br>Jumlah sudah keisi sesuai PO. <b>Ubah kalau yang datang beda</b> (kurang/lebih), isi 0 kalau gak datang.</div><button class="btn sm" id="sesuai" style="margin-bottom:6px">Semua sesuai PO</button><div id="lst"></div><input id="cat" placeholder="Catatan (misal: 2 bal sobek / kurang kirim)">';
+m.innerHTML=h;
+const draw=()=>{$('lst').innerHTML=p.items.map((it,i)=>{const v=poV[i];const opts=D.items.map(x=>'<option value="'+esc(x.code)+'"'+(v.code==x.code?' selected':'')+'>'+esc(x.nama)+'</option>').join('');
+const unmatched=!it.code;const row=D.items.find(x=>x.code==v.code);const unit=unmatched?(row?row.satuan:''):(it.unit=='bal'?'bal':it.satuan_stok);
+return '<div class="it"><b>'+esc(it.nama)+'</b><small class="mu">Dipesan: '+fmt(it.qty)+' '+esc(it.satuan)+'</small>'+(unmatched?'<select data-s="'+i+'"><option value="">— pilih barang yang cocok di katalog —</option>'+opts+'</select>':'')+'<div class="row"><input inputmode="decimal" data-q="'+i+'" value="'+esc(v.q)+'"><div style="flex:1;align-self:center">'+esc(unit)+'</div></div></div>'}).join('');upd()};
+const ok=()=>p.items.every((it,i)=>{const v=poV[i];return v.q!==''&&!isNaN(parseFloat(String(v.q).replace(',','.')))&&(parseFloat(String(v.q).replace(',','.'))==0||v.code)});
+const upd=()=>{$('cnt').textContent=p.items.length+' macam barang';$('go').disabled=!ok()};
+bar.classList.remove('hide');$('go').textContent='Kirim ke owner';draw();
+$('bk').onclick=()=>{poSel=null;view()};$('sesuai').onclick=()=>{p.items.forEach((it,i)=>{poV[i].q=String(it.qty)});draw()};
+$('lst').addEventListener('input',e=>{const i=e.target.dataset.q;if(i!==undefined){poV[i].q=e.target.value;upd()}});
+$('lst').addEventListener('change',e=>{const i=e.target.dataset.s;if(i!==undefined){poV[i].code=e.target.value;draw()}});
+$('go').onclick=async()=>{if(!confirm('Kirim hasil cek PO '+p.po+' ke owner?'))return;const entries=p.items.map((it,i)=>({code:poV[i].code,qty:parseFloat(String(poV[i].q).replace(',','.')),unit:(it.code&&it.unit=='bal')?'bal':'sat',nama:it.nama}));
+$('go').disabled=true;const r=await api('terimapo',{po:p.po,catatan:$('cat').value,entries});
+if(r.ok){alert('✅ Terkirim ke owner, nunggu disetujui');poSel=null;tab='riwayat';await boot()}else{alert(r.error||'Gagal');$('go').disabled=false}};return}
 if(tab=='pesanan'){let h='<div class="info">Pesanan customer yang harus disiapkan. Setelah barang keluar gudang, tekan <b>Sudah dikirim</b>.</div>';
 D.orders.forEach(o=>{h+='<div class="card"><b>'+esc(o.customer)+' <span class="badge '+(o.dikirim?'Dikirim':'Menunggu')+'">'+(o.dikirim?'Dikirim':'Belum dikirim')+'</span></b><small>'+esc(o.invoice)+' • '+esc(o.tgl)+(o.kirim?' • kirim '+esc(o.kirim):'')+' • '+esc(o.metode)+'</small><div style="margin:6px 0">'+o.items.map(i=>'• '+esc(i.nama)+' — <b>'+esc(i.qty)+' '+esc(i.satuan)+'</b>').join('<br>')+'</div>'+(o.alamat?'<small>📍 '+esc(o.alamat)+'</small><br>':'')+(o.dikirim?'<small>oleh '+esc(o.dikirim_oleh)+' • '+esc(o.dikirim_waktu)+'</small>':'<button class="btn sm" data-k="'+esc(o.invoice)+'">✅ Sudah dikirim</button>')+' <a class="btn sm" style="text-decoration:none;display:inline-block;background:#555;color:#fff" target="_blank" rel="noopener" href="/staff/api/dok/'+encodeURIComponent(o.invoice)+'">🖨️ Surat Jalan</a></div>'});
 m.innerHTML=h||'<p>Belum ada pesanan.</p>';m.querySelectorAll('[data-k]').forEach(b=>b.onclick=async()=>{if(!confirm('Barang untuk '+b.dataset.k+' sudah keluar & dikirim?'))return;b.disabled=true;const r=await api('kirim',{invoice:b.dataset.k});if(r.ok)boot();else alert(r.error||'Gagal')});return}
@@ -159,7 +179,8 @@ def add_staff_routes(app, sheets_getter, notify):
         peng = await asyncio.to_thread(sheets.get_pengajuan, None, st["id"])
         perm = await asyncio.to_thread(sheets.get_permintaan, st["id"], None, 30)
         peng = sorted(peng, key=lambda p: str(p.get("Waktu", "")))[-120:]
-        return web.json_response({"ok": True, "nama": st["nama"], "items": items, "orders": orders,
+        po = await asyncio.to_thread(sheets.get_po_untuk_terima, True, 30)
+        return web.json_response({"ok": True, "nama": st["nama"], "items": items, "orders": orders, "po": po,
                                   "pengajuan": peng, "permintaan": perm})
 
     async def _entries(sheets, body):
@@ -202,6 +223,31 @@ def add_staff_routes(app, sheets_getter, notify):
             await notify("pengajuan", {"batch": batch, "staff": st["nama"], "jenis": jenis, "ents": ents, "ref": ref})
         except Exception:
             logger.exception("gagal notif pengajuan")
+        return web.json_response({"ok": True, "batch": batch})
+
+    async def terimapo(request):
+        st = await _auth(request)
+        if not st:
+            return web.json_response({"ok": False, "error": "Login dulu"}, status=401)
+        body = await request.json()
+        no_po = str(body.get("po", "")).strip()[:40]
+        sheets = sheets_getter()
+        po = next((p for p in await asyncio.to_thread(sheets.get_po_untuk_terima, True, 200) if p["po"] == no_po), None)
+        if not po:
+            return web.json_response({"ok": False, "error": "PO tidak ditemukan / sudah dicek"}, status=404)
+        if po["status_terima"] == "Menunggu":
+            return web.json_response({"ok": False, "error": "PO ini sudah kamu kirim, nunggu owner"}, status=400)
+        ents = [e for e in await _entries(sheets, body) if e["qty"] > 0]
+        if not ents:
+            return web.json_response({"ok": False, "error": "Semua jumlah 0 — gak ada barang yang diterima"}, status=400)
+        catatan = str(body.get("catatan", ""))[:120]
+        batch = await asyncio.to_thread(sheets.add_pengajuan, st["nama"], "Masuk", ents, no_po)
+        await asyncio.to_thread(sheets.add_penerimaan, no_po, batch, st["nama"], catatan)
+        try:
+            await notify("pengajuan", {"batch": batch, "staff": st["nama"], "jenis": "Masuk", "ents": ents,
+                                       "ref": no_po + (f" — {catatan}" if catatan else "")})
+        except Exception:
+            logger.exception("gagal notif terima PO")
         return web.json_response({"ok": True, "batch": batch})
 
     async def permintaan(request):
@@ -262,6 +308,7 @@ def add_staff_routes(app, sheets_getter, notify):
         return web.Response(body=data, content_type="application/pdf",
                             headers={"Content-Disposition": f'inline; filename="{nama}"'})
 
+    app.router.add_post("/staff/api/terimapo", terimapo)
     app.router.add_get("/staff/api/dok/{inv}", dok_sj)
     app.router.add_post("/staff/api/ganti", ganti)
     app.router.add_get("/staff", page)

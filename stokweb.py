@@ -185,6 +185,20 @@ def add_stok_routes(app, sheets_getter):
             b = batches.setdefault(r["Batch"], {"batch": r["Batch"], "staff": r.get("Staff", ""), "jenis": r.get("Jenis", ""),
                                                 "waktu": r.get("Waktu", ""), "ref": r.get("Ref", ""), "items": []})
             b["items"].append({"nama": r.get("Nama", ""), "qty": r.get("Qty", ""), "satuan": r.get("Satuan", "")})
+        for b in batches.values():
+            if str(b["ref"]).upper().startswith(config.PO_PREFIX):
+                diterima = {}
+                for r in rows:
+                    if r["Batch"] == b["batch"]:
+                        k = str(r.get("Item_Code", "")).strip().upper()
+                        try:
+                            diterima[k] = diterima.get(k, 0) + float(r.get("Qty") or 0)
+                        except (TypeError, ValueError):
+                            pass
+                try:
+                    b["banding"] = await asyncio.to_thread(sheets.po_banding, str(b["ref"]).strip(), diterima)
+                except Exception:
+                    logger.exception("gagal banding PO")
         perm = await asyncio.to_thread(sheets.get_permintaan, None, "Baru", 50)
         orders = await asyncio.to_thread(sheets.get_orders_gudang, 15)
         return web.json_response({"ok": True, "pengajuan": list(batches.values()), "permintaan": perm,

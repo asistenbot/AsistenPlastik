@@ -1285,7 +1285,7 @@ class SheetsClient:
                     if r.get("Jenis") == "kontra_bon" and str(r.get("Ref", "")) == ref), None)
         if not rem:
             return None
-        tempo = self.get_tempo(rem.get("Nama", ""), "customer")
+        tempo = config.KONTRABON_TEMPO_HARI
         due = _today_date() + datetime.timedelta(days=tempo)
         self.update_reminder(rem["ID"], Status="Selesai")
         self.add_reminder("bayar_customer", ref, rem.get("Nama", ""), rem.get("Jumlah", 0), due,

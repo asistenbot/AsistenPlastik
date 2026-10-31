@@ -2125,7 +2125,7 @@ def _kontrabon_done(sheets, rem):
     nama, ref, jumlah = rem.get("Nama", ""), rem.get("Ref", ""), rem.get("Jumlah", 0)
     today = _wib_now().date()
     sheets.update_reminder(rem["ID"], Status="Selesai")
-    tempo = sheets.get_tempo(nama, "customer")
+    tempo = config.KONTRABON_TEMPO_HARI
     due = today + datetime.timedelta(days=tempo)
     sheets.add_reminder("bayar_customer", ref, nama, jumlah, due, "Cek pembayaran setelah kontra bon")
     return tempo, due

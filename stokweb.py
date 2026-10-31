@@ -85,7 +85,7 @@ th,td{padding:8px 10px;border-bottom:1px solid var(--ln);text-align:left;vertica
 td.n{text-align:right;white-space:nowrap}tr.menipis td:first-child{border-left:4px solid #e0a800}tr.habis td:first-child{border-left:4px solid #d9392b}tr.belum td:first-child{border-left:4px solid #bbb}tr.aman td:first-child{border-left:4px solid #2e9e63}
 td input{width:70px;padding:6px;border:1px solid var(--ln);border-radius:6px;text-align:right;font:inherit}
 .btn{background:var(--g);color:#fff;border:0;border-radius:8px;padding:10px 14px;font:inherit;font-weight:600}
-h2{font-size:15px;margin:20px 2px 6px}.mut{font-size:13px;color:var(--mu)}.mut div{padding:4px 0;border-bottom:1px solid var(--ln)}
+h2{font-size:15px;margin:20px 2px 6px}.card2{background:#fff;border:1px solid var(--ln);border-radius:12px;padding:10px 12px;margin:8px 0}.mut{font-size:13px;color:var(--mu)}.mut div{padding:4px 0;border-bottom:1px solid var(--ln)}
 @media(max-width:640px){.cards{grid-template-columns:repeat(2,1fr)}th:nth-child(n+5),td:nth-child(n+5){display:none}}
 </style></head><body><header><h1>📊 Dashboard Stok — __BIZ__</h1></header><main>
 <div class="cards"><div class="card h" data-f="habis"><b id="c_h">0</b><span>Habis</span></div><div class="card m" data-f="menipis"><b id="c_m">0</b><span>Menipis</span></div>
@@ -93,6 +93,9 @@ h2{font-size:15px;margin:20px 2px 6px}.mut{font-size:13px;color:var(--mu)}.mut d
 <div style="display:flex;gap:8px;margin-top:12px"><button class="btn" id="belanja">📋 Salin daftar belanja (yang menipis/habis)</button><button class="btn" id="semua" style="background:#555">Tampilkan semua</button></div>
 <input type="search" id="cari" placeholder="cari barang...">
 <table><thead><tr><th>Barang</th><th class="n">Stok</th><th class="n">Min</th><th>Status</th><th class="n">Isi 1 bal</th><th>Supplier</th></tr></thead><tbody id="tb"></tbody></table>
+<h2>✅ Menunggu persetujuan</h2><div id="pend"></div>
+<h2>🛒 Permintaan barang dari gudang</h2><div id="perm"></div>
+<h2>🚚 Status pengiriman pesanan</h2><div class="mut" id="ord"></div>
 <h2>Gerakan stok terakhir</h2><div class="mut" id="mut"></div></main>
 <script>
 const TOKEN=location.pathname.split('/')[2];let D=[],F='';
@@ -113,7 +116,14 @@ document.getElementById('belanja').onclick=()=>{const L=D.filter(i=>i.status=='m
 const txt='Daftar belanja:\\n'+(L.join('\\n')||'(semua aman)');navigator.clipboard?navigator.clipboard.writeText(txt).then(()=>alert('Tersalin:\\n\\n'+txt)):alert(txt)};
 async function load(){const r=await fetch('/dashboard/'+TOKEN+'/data');const j=await r.json();D=j.items;render();
 document.getElementById('mut').innerHTML=j.mutasi.map(m=>'<div>'+esc(m.Waktu)+' — <b>'+esc(m.Jenis)+'</b> '+esc(m.Nama||m.Item_Code)+': '+esc(m.Qty)+' '+esc(m.Satuan)+(m.Oleh?' ('+esc(m.Oleh)+')':'')+(m.Ref?' • '+esc(m.Ref):'')+'</div>').join('')||'Belum ada.'}
-load();setInterval(load,60000);
+async function loadPend(){const r=await (await fetch('/dashboard/'+TOKEN+'/pending')).json();if(!r.ok)return;
+document.getElementById('pend').innerHTML=r.pengajuan.map(b=>'<div class="card2"><b>'+esc(b.jenis=='Masuk'?'📥 Barang Masuk':'🧮 Hitung Stok')+' — '+esc(b.staff)+'</b><div class="mut">'+esc(b.waktu)+(b.ref?' • '+esc(b.ref):'')+'</div>'+b.items.map(i=>'<div>• '+esc(i.nama)+': <b>'+esc(i.qty)+' '+esc(i.satuan)+'</b></div>').join('')+'<div style="margin-top:8px"><button class="btn" data-b="'+esc(b.batch)+'" data-a="1">✅ Setujui</button> <button class="btn" style="background:#b3261e" data-b="'+esc(b.batch)+'" data-a="0">❌ Tolak</button></div></div>').join('')||'<div class="mut">Tidak ada yang menunggu.</div>';
+document.getElementById('perm').innerHTML=r.permintaan.map(q=>'<div class="card2"><b>'+esc(q.Nama)+': '+esc(q.Qty)+' '+esc(q.Satuan)+'</b><div class="mut">'+esc(q.Staff)+' • '+esc(q.Waktu)+(q.Catatan?' • '+esc(q.Catatan):'')+'</div><button class="btn" data-q="'+esc(q.ID)+'">✔ Tandai sudah diproses</button></div>').join('')||'<div class="mut">Tidak ada permintaan baru.</div>';
+document.getElementById('ord').innerHTML=r.orders.map(o=>'<div>'+(o.dikirim?'✅':'⏳')+' '+esc(o.invoice)+' — '+esc(o.customer)+(o.dikirim?' (dikirim oleh '+esc(o.dikirim_oleh)+')':' (belum dikirim)')+'</div>').join('')||'Belum ada.'}
+document.addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;
+if(b.dataset.b){if(!confirm(b.dataset.a=='1'?'Setujui pengajuan ini? Stok akan berubah.':'Tolak pengajuan ini?'))return;b.disabled=true;await fetch('/dashboard/'+TOKEN+'/decide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({batch:b.dataset.b,approve:b.dataset.a=='1'})});load();loadPend()}
+if(b.dataset.q){b.disabled=true;await fetch('/dashboard/'+TOKEN+'/permintaan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:b.dataset.q,status:'Selesai'})});loadPend()}});
+load();loadPend();setInterval(()=>{load();loadPend()},60000);
 </script></body></html>"""
 
 
@@ -211,9 +221,51 @@ def add_stok_routes(app, sheets_getter):
         ok = await asyncio.to_thread(sheets_getter().set_stok_setting, str(body.get("code", "")), field, val)
         return web.json_response({"ok": bool(ok)})
 
-    app.router.add_get("/gudang/{token}", gudang_page)
-    app.router.add_get("/gudang/{token}/data", gudang_data)
-    app.router.add_post("/gudang/{token}", gudang_submit)
+    async def gudang_lama(request):
+        raise web.HTTPFound("/staff")
+
+    # link /gudang/<token> yang lama dimatiin: staff sekarang lewat /staff (login + persetujuan owner)
+    app.router.add_get("/gudang/{token}", gudang_lama)
+    app.router.add_get("/gudang/{token}/data", gudang_lama)
+    app.router.add_post("/gudang/{token}", gudang_lama)
+
+    async def pending(request):
+        if not await _link(request, ("@owner",)):
+            return web.json_response({"ok": False}, status=404)
+        sheets = sheets_getter()
+        rows = await asyncio.to_thread(sheets.get_pengajuan, "Menunggu", None)
+        batches = {}
+        for r in rows:
+            b = batches.setdefault(r["Batch"], {"batch": r["Batch"], "staff": r.get("Staff", ""), "jenis": r.get("Jenis", ""),
+                                                "waktu": r.get("Waktu", ""), "ref": r.get("Ref", ""), "items": []})
+            b["items"].append({"nama": r.get("Nama", ""), "qty": r.get("Qty", ""), "satuan": r.get("Satuan", "")})
+        perm = await asyncio.to_thread(sheets.get_permintaan, None, "Baru", 50)
+        orders = await asyncio.to_thread(sheets.get_orders_gudang, 15)
+        return web.json_response({"ok": True, "pengajuan": list(batches.values()), "permintaan": perm,
+                                  "orders": orders})
+
+    async def decide(request):
+        if not await _link(request, ("@owner",)):
+            return web.json_response({"ok": False}, status=404)
+        body = await request.json()
+        n = await asyncio.to_thread(sheets_getter().decide_pengajuan, str(body.get("batch", "")),
+                                    bool(body.get("approve")), "owner (dashboard)")
+        _clear = getattr(sheets_getter(), "_data_cache", None)
+        return web.json_response({"ok": n is not None})
+
+    async def perm_status(request):
+        if not await _link(request, ("@owner",)):
+            return web.json_response({"ok": False}, status=404)
+        body = await request.json()
+        st = body.get("status")
+        if st not in ("Diproses", "Selesai", "Baru"):
+            return web.json_response({"ok": False}, status=400)
+        ok = await asyncio.to_thread(sheets_getter().set_permintaan_status, str(body.get("id", "")), st)
+        return web.json_response({"ok": bool(ok)})
+
+    app.router.add_get("/dashboard/{token}/pending", pending)
+    app.router.add_post("/dashboard/{token}/decide", decide)
+    app.router.add_post("/dashboard/{token}/permintaan", perm_status)
     app.router.add_get("/dashboard/{token}", dash_page)
     app.router.add_get("/dashboard/{token}/data", dash_data)
     app.router.add_post("/dashboard/{token}/set", dash_set)

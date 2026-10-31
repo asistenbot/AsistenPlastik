@@ -145,3 +145,11 @@ PUBLIC_BASE_URL = (os.getenv("PUBLIC_BASE_URL") or "").strip().rstrip("/")
 if not PUBLIC_BASE_URL and os.getenv("RAILWAY_PUBLIC_DOMAIN"):
     PUBLIC_BASE_URL = "https://" + os.getenv("RAILWAY_PUBLIC_DOMAIN").strip()
 WEB_PORT = int(os.getenv("PORT") or 8080)
+
+# ==== STAFF GUDANG ====
+SHEET_STAFF = "Staff"
+SHEET_PENGAJUAN = "PengajuanStok"
+SHEET_PERMINTAAN = "PermintaanBarang"
+SHEET_PENGIRIMAN = "PengirimanOrder"
+import hashlib as _hl
+WEB_SECRET = os.getenv("WEB_SECRET") or _hl.sha256(((TELEGRAM_BOT_TOKEN or "dev") + "|web").encode()).hexdigest()

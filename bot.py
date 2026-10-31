@@ -324,7 +324,7 @@ Command di bawah ini cadangan aja kalau mau lebih pasti/cepat:
 (kalau customer punya banyak invoice, bot kasih daftar buat dipilih)
 /lunas <no invoice atau nama customer> — tandai order sudah dibayar
 /harga <kategori/nama> <harga> [beli] — ubah harga banyak produk sekaligus (ada preview)
-/stok [nama] — cek stok menipis / stok barang tertentu\n/linkgudang — link input stok buat pegawai\n/linkdashboard — link dashboard stok (lu aja)\n/pengingat — lihat jadwal pengingat (kontra bon, tagihan, bayar supplier)
+/stok [nama] — cek stok menipis / stok barang tertentu\n/staffbaru <nama> — bikin akun staff gudang (ID+password)\n/staff — daftar staff, /staffreset <id>, /staffoff <id>\n/linkdashboard — link dashboard stok (lu aja)\n/pengingat — lihat jadwal pengingat (kontra bon, tagihan, bayar supplier)
 /piutang — rekap tagihan customer yang belum lunas
 
 /po — bikin Purchase Order (belanja) ke supplier
@@ -1531,6 +1531,18 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await _ask_lunas(update, val)
         return
 
+    if data.startswith(("pg_ok:", "pg_no:")):
+        approve = data.startswith("pg_ok:")
+        batch = data.split(":", 1)[1]
+        n = _sheets().decide_pengajuan(batch, approve, f"owner (Telegram)")
+        if n is None:
+            await query.edit_message_text(f"Pengajuan {batch} udah diputuskan sebelumnya.")
+        else:
+            await query.edit_message_text(
+                f"{'✅ Disetujui' if approve else '❌ Ditolak'}: pengajuan {batch} ({n} barang)."
+                + (" Stok sudah diperbarui." if approve else ""))
+        return
+
     if data == "hk_no":
         context.user_data.pop("pending_hk", None)
         await query.edit_message_text("Oke, harga gak jadi diubah.")
@@ -2433,13 +2445,78 @@ async def linkorder_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Kirim link ini ke dia. Order yang masuk muncul di Telegram buat lu konfirmasi.")
 
 
+async def _notify_staff_event(app, kind, data):
+    """Kabar dari panel staff gudang -> Telegram owner."""
+    markup = None
+    if kind == "pengajuan":
+        judul = "📥 Barang masuk" if data["jenis"] == "Masuk" else "🧮 Hitung stok"
+        baris = "\n".join(f"• {e['nama']}: {e['qty']:g} {e['satuan']}" for e in data["ents"][:25])
+        text = (f"{judul} diajukan {data['staff']}" + (f" ({data['ref']})" if data.get("ref") else "")
+                + f"\n\n{baris}\n\nSetujui supaya stok berubah.")
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Setujui", callback_data=f"pg_ok:{data['batch']}"),
+                                        InlineKeyboardButton("❌ Tolak", callback_data=f"pg_no:{data['batch']}")]])
+    elif kind == "permintaan":
+        baris = "\n".join(f"• {e['nama']}: {e['qty']:g} {e['satuan']}" for e in data["ents"][:25])
+        text = f"🛒 {data['staff']} minta barang (perlu dipesan):\n\n{baris}"
+    elif kind == "kirim":
+        text = f"🚚 {data['staff']} menandai {data['invoice']} ({data['customer']}) sudah dikirim."
+    else:
+        return
+    for chat_id in [c for c in config.OWNER_TELEGRAM_IDS if c]:
+        try:
+            await app.bot.send_message(chat_id=chat_id, text=text, reply_markup=markup)
+        except Exception:
+            logger.exception("gagal kirim kabar staff ke %s", chat_id)
+    await _mirror(app.bot, "stok", text=text, reply_markup=markup)
+
+
+@owner_only
+async def staffbaru_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    nama = " ".join(context.args).strip() if context.args else ""
+    if not nama:
+        await update.effective_message.reply_text("Format: /staffbaru Budi")
+        return
+    sid, pw = _sheets().create_staff(nama)
+    link = f"{config.PUBLIC_BASE_URL}/staff" if config.PUBLIC_BASE_URL else "(alamat publik belum aktif)"
+    await update.effective_message.reply_text(
+        f"✅ Akun staff dibuat\n\nNama: {nama}\nID: {sid}\nPassword: {pw}\nLink login: {link}\n\n"
+        "Kasih info ini ke staff. Password gak bisa dilihat lagi nanti, kalau lupa pakai /staffreset " + sid)
+
+
+@owner_only
+async def staffreset_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    sid = context.args[0] if context.args else ""
+    pw = _sheets().reset_staff_password(sid) if sid else None
+    await update.effective_message.reply_text(
+        f"🔑 Password baru {sid}: {pw}" if pw else "Format: /staffreset <id>. ID gak ketemu." )
+
+
+@owner_only
+async def staffoff_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    sid = context.args[0] if context.args else ""
+    aktif = bool(context.args and len(context.args) > 1 and context.args[1].lower() == "on")
+    ok = _sheets().set_staff_aktif(sid, aktif) if sid else False
+    await update.effective_message.reply_text(
+        (f"✅ {sid} sekarang {'aktif' if aktif else 'dinonaktifkan'}." if ok
+         else "Format: /staffoff <id>  (nonaktifkan)  atau  /staffoff <id> on  (aktifkan lagi)"))
+
+
+@owner_only
+async def stafflist_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    st = _sheets().list_staff()
+    await update.effective_message.reply_text(
+        "Staff gudang:\n" + ("\n".join(f"{'🟢' if s_['aktif'] else '⚪'} {s_['id']} — {s_['nama']}" for s_ in st)
+                             if st else "(belum ada) Bikin dengan /staffbaru <nama>"))
+
+
 async def on_startup(app: Application):
     # panggil sekali biar SheetsClient nyiapin skema tab kalau belum ada
     _sheets()
     try:
         import webapp
         app.bot_data["web_runner"] = await webapp.start_web(
-            _sheets, lambda pid, parsed: _notify_web_order(app, pid, parsed))
+            _sheets, lambda pid, parsed: _notify_web_order(app, pid, parsed),
+            lambda kind, data: _notify_staff_event(app, kind, data))
     except Exception:
         logger.exception("web order gagal jalan (bot Telegram tetap jalan)")
     logger.info("Asisten Plastik siap jalan.")
@@ -2457,7 +2534,10 @@ def main():
     app.add_handler(CommandHandler("pricelist", pricelist_cmd))
     app.add_handler(CommandHandler("topik", topik_cmd))
     app.add_handler(CommandHandler("linkorder", linkorder_cmd))
-    app.add_handler(CommandHandler("linkgudang", linkgudang_cmd))
+    app.add_handler(CommandHandler("staffbaru", staffbaru_cmd))
+    app.add_handler(CommandHandler("staffreset", staffreset_cmd))
+    app.add_handler(CommandHandler("staffoff", staffoff_cmd))
+    app.add_handler(CommandHandler("staff", stafflist_cmd))
     app.add_handler(CommandHandler("linkdashboard", linkdashboard_cmd))
     app.add_handler(CommandHandler("stok", stok_cmd))
     app.add_handler(CommandHandler("harga", hargakategori_cmd))

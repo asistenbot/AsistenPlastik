@@ -62,6 +62,11 @@ SCHEMA = {
         "Terkirim_Tgl", "Dibuat", "Catatan",
     ],
     config.SHEET_TOPIK: ["Kunci", "Chat_ID", "Thread_ID"],
+    config.SHEET_STAFF: ["ID", "Nama", "Hash", "Salt", "Aktif", "Dibuat"],
+    config.SHEET_PENGAJUAN: ["ID", "Batch", "Waktu", "Staff", "Jenis", "Item_Code", "Nama", "Qty", "Satuan",
+                             "Ref", "Status", "Diputuskan_Oleh", "Diputuskan_Waktu"],
+    config.SHEET_PERMINTAAN: ["ID", "Waktu", "Staff", "Item_Code", "Nama", "Qty", "Satuan", "Catatan", "Status"],
+    config.SHEET_PENGIRIMAN: ["No_Invoice", "Status", "Staff", "Waktu"],
     config.SHEET_LINKORDER: ["Token", "Nama_Customer", "Aktif", "Dibuat", "Catatan"],
     config.SHEET_PESANANWEB: ["ID", "Waktu", "Nama", "Payload", "Status"],
     config.SHEET_TAGIHAN: [
@@ -1376,6 +1381,180 @@ class SheetsClient:
                 ws.batch_update([{"range": rowcol_to_a1(i, col + 1), "values": [[value]]}])
                 return True
         return False
+
+    # ---------------- STAFF GUDANG ----------------
+
+    @staticmethod
+    def _hash_pw(pw, salt):
+        import hashlib
+        return hashlib.pbkdf2_hmac("sha256", pw.encode(), bytes.fromhex(salt), 120_000).hex()
+
+    def _staff_rows(self):
+        return self._records(self._ws(config.SHEET_STAFF))
+
+    def create_staff(self, nama):
+        """Bikin akun staff baru. Balikin (id, password_polos) -- password cuma
+        keliatan sekali ini; di sheet disimpen cuma hash-nya."""
+        import re
+        import secrets
+        base = re.sub(r"[^a-z0-9]", "", nama.lower())[:12] or "staff"
+        ids = {str(r.get("ID", "")).lower() for r in self._staff_rows()}
+        sid, n = base, 1
+        while sid in ids:
+            n += 1
+            sid = f"{base}{n}"
+        alfabet = "abcdefghjkmnpqrstuvwxyz23456789"
+        pw = "".join(secrets.choice(alfabet) for _ in range(8))
+        salt = secrets.token_hex(8)
+        self._ws(config.SHEET_STAFF).append_row(
+            [sid, nama, self._hash_pw(pw, salt), salt, "YA", _now_str()], value_input_option="RAW")
+        return sid, pw
+
+    def reset_staff_password(self, sid):
+        import secrets
+        ws = self._ws(config.SHEET_STAFF)
+        for i, row in enumerate(ws.get_all_values()[1:], start=2):
+            if row and row[0].lower() == sid.lower():
+                alfabet = "abcdefghjkmnpqrstuvwxyz23456789"
+                pw = "".join(secrets.choice(alfabet) for _ in range(8))
+                salt = secrets.token_hex(8)
+                ws.batch_update([{"range": f"C{i}:D{i}", "values": [[self._hash_pw(pw, salt), salt]]}])
+                return pw
+        return None
+
+    def set_staff_aktif(self, sid, aktif):
+        ws = self._ws(config.SHEET_STAFF)
+        for i, row in enumerate(ws.get_all_values()[1:], start=2):
+            if row and row[0].lower() == sid.lower():
+                ws.batch_update([{"range": f"E{i}", "values": [["YA" if aktif else "TIDAK"]]}])
+                return True
+        return False
+
+    def verify_staff(self, sid, pw):
+        import hmac
+        for r in self._staff_rows():
+            if str(r.get("ID", "")).lower() == str(sid).strip().lower():
+                if str(r.get("Aktif", "")).upper() == "TIDAK":
+                    return None
+                h = self._hash_pw(pw, str(r.get("Salt", "")))
+                if hmac.compare_digest(h, str(r.get("Hash", ""))):
+                    return {"id": r["ID"], "nama": r.get("Nama", "")}
+        return None
+
+    def get_staff_info(self, sid):
+        for r in self._staff_rows():
+            if str(r.get("ID", "")).lower() == str(sid).lower() and str(r.get("Aktif", "")).upper() != "TIDAK":
+                return {"id": r["ID"], "nama": r.get("Nama", "")}
+        return None
+
+    def list_staff(self):
+        return [{"id": r.get("ID"), "nama": r.get("Nama"), "aktif": str(r.get("Aktif", "")).upper() != "TIDAK"}
+                for r in self._staff_rows()]
+
+    # pengajuan stok (staff ajukan -> owner setujui)
+    def add_pengajuan(self, staff, jenis, entries, ref=""):
+        """jenis: Masuk | Hitung. entries: [{item_code,nama,qty,satuan}]. Balikin batch id."""
+        batch = "B" + uuid.uuid4().hex[:6].upper()
+        ts = _now_str()
+        rows = [[f"{batch}-{i + 1}", batch, ts, staff, jenis, e["item_code"], e.get("nama", ""), e["qty"],
+                 e.get("satuan", ""), ref, "Menunggu", "", ""] for i, e in enumerate(entries)]
+        self._ws(config.SHEET_PENGAJUAN).append_rows(rows, value_input_option="RAW")
+        return batch
+
+    def get_pengajuan(self, status=None, staff=None):
+        rows = self._records(self._ws(config.SHEET_PENGAJUAN))
+        if status:
+            rows = [r for r in rows if r.get("Status") == status]
+        if staff:
+            rows = [r for r in rows if str(r.get("Staff", "")) == staff]
+        return rows
+
+    def decide_pengajuan(self, batch, approve, oleh="owner"):
+        """Setujui/tolak 1 batch. Kalau disetujui -> masuk ke MutasiStok. Balikin jumlah baris, atau None."""
+        from gspread.utils import rowcol_to_a1
+        ws = self._ws(config.SHEET_PENGAJUAN)
+        values = ws.get_all_values()
+        if not values:
+            return None
+        h = values[0]
+        cb, cs, co, cw = h.index("Batch"), h.index("Status"), h.index("Diputuskan_Oleh"), h.index("Diputuskan_Waktu")
+        data, entries = [], []
+        for i, row in enumerate(values[1:], start=2):
+            if len(row) > cs and row[cb] == batch and row[cs] == "Menunggu":
+                st = "Disetujui" if approve else "Ditolak"
+                data += [{"range": rowcol_to_a1(i, cs + 1), "values": [[st]]},
+                         {"range": rowcol_to_a1(i, co + 1), "values": [[oleh]]},
+                         {"range": rowcol_to_a1(i, cw + 1), "values": [[_now_str()]]}]
+                entries.append({"item_code": row[h.index("Item_Code")], "nama": row[h.index("Nama")],
+                                "jenis": row[h.index("Jenis")], "qty": row[h.index("Qty")],
+                                "satuan": row[h.index("Satuan")], "ref": row[h.index("Ref")] or batch,
+                                "catatan": f"Pengajuan {batch}", "oleh": row[h.index("Staff")]})
+        if not entries:
+            return None
+        if approve:
+            self.add_mutasi(entries)
+        ws.batch_update(data)
+        return len(entries)
+
+    # permintaan barang (staff minta owner order)
+    def add_permintaan(self, staff, entries):
+        ts = _now_str()
+        rows = []
+        for e in entries:
+            rows.append(["Q" + uuid.uuid4().hex[:6].upper(), ts, staff, e["item_code"], e.get("nama", ""),
+                         e["qty"], e.get("satuan", ""), e.get("catatan", ""), "Baru"])
+        self._ws(config.SHEET_PERMINTAAN).append_rows(rows, value_input_option="RAW")
+        return len(rows)
+
+    def get_permintaan(self, staff=None, status=None, n=50):
+        rows = self._records(self._ws(config.SHEET_PERMINTAAN))
+        if staff:
+            rows = [r for r in rows if r.get("Staff") == staff]
+        if status:
+            rows = [r for r in rows if r.get("Status") == status]
+        return sorted(rows, key=lambda r: str(r.get("Waktu", "")), reverse=True)[:n]
+
+    def set_permintaan_status(self, pid, status):
+        ws = self._ws(config.SHEET_PERMINTAAN)
+        for i, row in enumerate(ws.get_all_values()[1:], start=2):
+            if row and row[0] == pid:
+                ws.batch_update([{"range": f"I{i}", "values": [[status]]}])
+                return True
+        return False
+
+    # pengiriman order (staff tandai barang udah keluar/dikirim)
+    def get_pengiriman_map(self):
+        return {str(r.get("No_Invoice", "")): r for r in self._records(self._ws(config.SHEET_PENGIRIMAN))}
+
+    def set_pengiriman(self, no_invoice, staff):
+        ws = self._ws(config.SHEET_PENGIRIMAN)
+        for i, row in enumerate(ws.get_all_values()[1:], start=2):
+            if row and row[0] == no_invoice:
+                ws.batch_update([{"range": f"A{i}:D{i}", "values": [[no_invoice, "Dikirim", staff, _now_str()]]}])
+                return
+        ws.append_row([no_invoice, "Dikirim", staff, _now_str()], value_input_option="RAW")
+
+    def get_orders_gudang(self, limit=40):
+        """Order customer yang gak Batal, dikelompokin per invoice, terbaru dulu."""
+        by = {}
+        for r in self.get_all_orders():
+            if str(r.get("Status", "")) == "Batal":
+                continue
+            inv = str(r.get("No_Invoice", ""))
+            d = by.setdefault(inv, {"invoice": inv, "customer": r.get("Nama_Customer", ""),
+                                    "alamat": r.get("Alamat", ""), "metode": r.get("Metode", ""),
+                                    "tgl": str(r.get("Timestamp", ""))[:10], "kirim": str(r.get("Tanggal_Kirim", "")),
+                                    "po": r.get("No_PO_Customer", ""), "items": []})
+            d["items"].append({"nama": r.get("Nama_Item", ""), "qty": r.get("Qty", ""), "satuan": r.get("Satuan", "")})
+        kirim = self.get_pengiriman_map()
+        out = []
+        for d in sorted(by.values(), key=lambda d: d["invoice"], reverse=True)[:limit]:
+            k = kirim.get(d["invoice"])
+            d["dikirim"] = bool(k)
+            d["dikirim_oleh"] = (k or {}).get("Staff", "")
+            d["dikirim_waktu"] = str((k or {}).get("Waktu", ""))
+            out.append(d)
+        return out
 
     def get_harga_customer(self, nama):
         """{ITEM_CODE: harga khusus} buat 1 customer (tab HargaCustomer)."""

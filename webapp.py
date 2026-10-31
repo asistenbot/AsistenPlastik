@@ -120,7 +120,7 @@ def _num(v):
         return 0.0
 
 
-def make_web_app(sheets_getter, on_order):
+def make_web_app(sheets_getter, on_order, on_staff_event=None):
     """on_order(pid, parsed) -> coroutine, dipanggil tiap order masuk."""
 
     async def health(request):
@@ -209,15 +209,19 @@ def make_web_app(sheets_getter, on_order):
 
     app = web.Application(client_max_size=256 * 1024)
     import stokweb
+    import staffweb
     stokweb.add_stok_routes(app, sheets_getter)
+    async def _noop(kind, data):
+        return None
+    staffweb.add_staff_routes(app, sheets_getter, on_staff_event or _noop)
     app.router.add_get("/", health)
     app.router.add_get("/order/{token}", form)
     app.router.add_post("/order/{token}", submit)
     return app
 
 
-async def start_web(sheets_getter, on_order):
-    runner = web.AppRunner(make_web_app(sheets_getter, on_order))
+async def start_web(sheets_getter, on_order, on_staff_event=None):
+    runner = web.AppRunner(make_web_app(sheets_getter, on_order, on_staff_event))
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", config.WEB_PORT)
     await site.start()

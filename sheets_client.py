@@ -1278,6 +1278,20 @@ class SheetsClient:
         return [r for r in self.get_active_reminders()
                 if str(r.get("Tanggal", "")) <= today_str and str(r.get("Terkirim_Tgl", "")) != today_str]
 
+    def tandai_kontra_bon(self, ref):
+        """Invoice `ref` udah di-kontra bon: tutup pengingat kontra bon-nya dan
+        pasang pengingat cek pembayaran sesuai tempo. Balikin (tempo, due) atau None."""
+        rem = next((r for r in self.get_active_reminders()
+                    if r.get("Jenis") == "kontra_bon" and str(r.get("Ref", "")) == ref), None)
+        if not rem:
+            return None
+        tempo = self.get_tempo(rem.get("Nama", ""), "customer")
+        due = _today_date() + datetime.timedelta(days=tempo)
+        self.update_reminder(rem["ID"], Status="Selesai")
+        self.add_reminder("bayar_customer", ref, rem.get("Nama", ""), rem.get("Jumlah", 0), due,
+                          "Cek pembayaran setelah kontra bon")
+        return tempo, due
+
     def update_reminder(self, rid, **fields):
         """fields: Status / Tanggal / Terkirim_Tgl / Catatan."""
         from gspread.utils import rowcol_to_a1

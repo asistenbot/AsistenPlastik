@@ -70,61 +70,7 @@ const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.error||'Gagal');alert('
 load();
 </script></body></html>"""
 
-DASH_HTML = """<!doctype html><html lang="id"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Dashboard Stok</title><style>
-:root{--g:#0f7b6c;--bg:#f4f7f6;--ink:#1c2b28;--mu:#6b7c78;--ln:#dbe4e1}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,sans-serif}
-header{background:var(--g);color:#fff;padding:14px 16px}header h1{margin:0;font-size:19px}
-main{max-width:980px;margin:0 auto;padding:12px}
-.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.card{background:#fff;border:1px solid var(--ln);border-radius:12px;padding:10px;text-align:center;cursor:pointer}
-.card b{display:block;font-size:24px}.card span{font-size:12px;color:var(--mu)}
-.card.m b{color:#b27a00}.card.h b{color:#c0281c}.card.a b{color:#14633a}.card.b b{color:#666}
-input[type=search]{width:100%;padding:10px;border:1px solid var(--ln);border-radius:8px;font:inherit;margin:12px 0 8px}
-table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--ln);border-radius:12px;overflow:hidden}
-th,td{padding:8px 10px;border-bottom:1px solid var(--ln);text-align:left;vertical-align:middle}th{font-size:12px;color:var(--mu);background:#f0f5f3}
-td.n{text-align:right;white-space:nowrap}tr.menipis td:first-child{border-left:4px solid #e0a800}tr.habis td:first-child{border-left:4px solid #d9392b}tr.belum td:first-child{border-left:4px solid #bbb}tr.aman td:first-child{border-left:4px solid #2e9e63}
-td input{width:70px;padding:6px;border:1px solid var(--ln);border-radius:6px;text-align:right;font:inherit}
-.btn{background:var(--g);color:#fff;border:0;border-radius:8px;padding:10px 14px;font:inherit;font-weight:600}
-h2{font-size:15px;margin:20px 2px 6px}.card2{background:#fff;border:1px solid var(--ln);border-radius:12px;padding:10px 12px;margin:8px 0}.mut{font-size:13px;color:var(--mu)}.mut div{padding:4px 0;border-bottom:1px solid var(--ln)}
-@media(max-width:640px){.cards{grid-template-columns:repeat(2,1fr)}th:nth-child(n+5),td:nth-child(n+5){display:none}}
-</style></head><body><header><h1>📊 Dashboard Stok — __BIZ__</h1></header><main>
-<div class="cards"><div class="card h" data-f="habis"><b id="c_h">0</b><span>Habis</span></div><div class="card m" data-f="menipis"><b id="c_m">0</b><span>Menipis</span></div>
-<div class="card a" data-f="aman"><b id="c_a">0</b><span>Aman</span></div><div class="card b" data-f="belum"><b id="c_b">0</b><span>Belum dihitung</span></div></div>
-<div style="display:flex;gap:8px;margin-top:12px"><button class="btn" id="belanja">📋 Salin daftar belanja (yang menipis/habis)</button><button class="btn" id="semua" style="background:#555">Tampilkan semua</button></div>
-<input type="search" id="cari" placeholder="cari barang...">
-<table><thead><tr><th>Barang</th><th class="n">Stok</th><th class="n">Min</th><th>Status</th><th class="n">Isi 1 bal</th><th>Supplier</th></tr></thead><tbody id="tb"></tbody></table>
-<h2>✅ Menunggu persetujuan</h2><div id="pend"></div>
-<h2>🛒 Permintaan barang dari gudang</h2><div id="perm"></div>
-<h2>🚚 Status pengiriman pesanan</h2><div class="mut" id="ord"></div>
-<h2>Gerakan stok terakhir</h2><div class="mut" id="mut"></div></main>
-<script>
-const TOKEN=location.pathname.split('/')[2];let D=[],F='';
-const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const fmt=n=>(Math.round(n*100)/100).toLocaleString('id-ID');
-function stokTxt(i){if(i.stok===null)return '-';let t=fmt(i.stok)+' '+esc(i.satuan);if(i.isi_bal>0&&i.stok>=i.isi_bal)t+=' <small>('+(Math.round(i.stok/i.isi_bal*10)/10)+' bal)</small>';return t}
-const ORD={habis:0,menipis:1,belum:2,aman:3};
-function render(){const q=document.getElementById('cari').value.toLowerCase();let L=D.filter(i=>(!F||i.status==F)&&(i.nama+' '+i.code+' '+i.kategori).toLowerCase().includes(q));
-L.sort((a,b)=>ORD[a.status]-ORD[b.status]||a.nama.localeCompare(b.nama));
-document.getElementById('tb').innerHTML=L.map(i=>'<tr class="'+i.status+'"><td><b>'+esc(i.nama)+'</b><br><small style="color:#888">'+esc(i.code)+'</small></td><td class="n">'+stokTxt(i)+'</td><td class="n"><input data-k="min" data-c="'+esc(i.code)+'" value="'+(i.min||'')+'" inputmode="decimal"></td><td>'+({aman:'🟢 Aman',menipis:'🟡 Menipis',habis:'🔴 Habis',belum:'⚪ Belum dihitung'})[i.status]+'</td><td class="n"><input data-k="isi_bal" data-c="'+esc(i.code)+'" value="'+(i.isi_bal||'')+'" inputmode="decimal"></td><td>'+esc(i.supplier||'')+'</td></tr>').join('');
-const c=s=>D.filter(i=>i.status==s).length;['h:habis','m:menipis','a:aman','b:belum'].forEach(x=>{const[a,b]=x.split(':');document.getElementById('c_'+a).textContent=c(b)})}
-document.getElementById('tb').addEventListener('change',async e=>{const c=e.target.dataset.c;if(!c)return;const v=parseFloat(String(e.target.value).replace(',','.'))||0;
-await fetch('/dashboard/'+TOKEN+'/set',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:c,field:e.target.dataset.k,value:v})});load()});
-document.querySelectorAll('.card').forEach(x=>x.onclick=()=>{F=F==x.dataset.f?'':x.dataset.f;render()});
-document.getElementById('semua').onclick=()=>{F='';document.getElementById('cari').value='';render()};
-document.getElementById('cari').oninput=render;
-document.getElementById('belanja').onclick=()=>{const L=D.filter(i=>i.status=='menipis'||i.status=='habis').map(i=>{const need=Math.max((i.min||0)*2-(i.stok||0),0);let t='• '+i.nama+' — stok '+fmt(i.stok||0)+' '+i.satuan;if(need>0){t+=' → order ±'+fmt(need)+' '+i.satuan;if(i.isi_bal>0)t+=' (±'+Math.ceil(need/i.isi_bal)+' bal)'}return t});
-const txt='Daftar belanja:\\n'+(L.join('\\n')||'(semua aman)');navigator.clipboard?navigator.clipboard.writeText(txt).then(()=>alert('Tersalin:\\n\\n'+txt)):alert(txt)};
-async function load(){const r=await fetch('/dashboard/'+TOKEN+'/data');const j=await r.json();D=j.items;render();
-document.getElementById('mut').innerHTML=j.mutasi.map(m=>'<div>'+esc(m.Waktu)+' — <b>'+esc(m.Jenis)+'</b> '+esc(m.Nama||m.Item_Code)+': '+esc(m.Qty)+' '+esc(m.Satuan)+(m.Oleh?' ('+esc(m.Oleh)+')':'')+(m.Ref?' • '+esc(m.Ref):'')+'</div>').join('')||'Belum ada.'}
-async function loadPend(){const r=await (await fetch('/dashboard/'+TOKEN+'/pending')).json();if(!r.ok)return;
-document.getElementById('pend').innerHTML=r.pengajuan.map(b=>'<div class="card2"><b>'+esc(b.jenis=='Masuk'?'📥 Barang Masuk':'🧮 Hitung Stok')+' — '+esc(b.staff)+'</b><div class="mut">'+esc(b.waktu)+(b.ref?' • '+esc(b.ref):'')+'</div>'+b.items.map(i=>'<div>• '+esc(i.nama)+': <b>'+esc(i.qty)+' '+esc(i.satuan)+'</b></div>').join('')+'<div style="margin-top:8px"><button class="btn" data-b="'+esc(b.batch)+'" data-a="1">✅ Setujui</button> <button class="btn" style="background:#b3261e" data-b="'+esc(b.batch)+'" data-a="0">❌ Tolak</button></div></div>').join('')||'<div class="mut">Tidak ada yang menunggu.</div>';
-document.getElementById('perm').innerHTML=r.permintaan.map(q=>'<div class="card2"><b>'+esc(q.Nama)+': '+esc(q.Qty)+' '+esc(q.Satuan)+'</b><div class="mut">'+esc(q.Staff)+' • '+esc(q.Waktu)+(q.Catatan?' • '+esc(q.Catatan):'')+'</div><button class="btn" data-q="'+esc(q.ID)+'">✔ Tandai sudah diproses</button></div>').join('')||'<div class="mut">Tidak ada permintaan baru.</div>';
-document.getElementById('ord').innerHTML=r.orders.map(o=>'<div>'+(o.dikirim?'✅':'⏳')+' '+esc(o.invoice)+' — '+esc(o.customer)+(o.dikirim?' (dikirim oleh '+esc(o.dikirim_oleh)+')':' (belum dikirim)')+'</div>').join('')||'Belum ada.'}
-document.addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;
-if(b.dataset.b){if(!confirm(b.dataset.a=='1'?'Setujui pengajuan ini? Stok akan berubah.':'Tolak pengajuan ini?'))return;b.disabled=true;await fetch('/dashboard/'+TOKEN+'/decide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({batch:b.dataset.b,approve:b.dataset.a=='1'})});load();loadPend()}
-if(b.dataset.q){b.disabled=true;await fetch('/dashboard/'+TOKEN+'/permintaan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:b.dataset.q,status:'Selesai'})});loadPend()}});
-load();loadPend();setInterval(()=>{load();loadPend()},60000);
-</script></body></html>"""
+from dashhtml import DASH_HTML  # noqa: E402
 
 
 def _stok_items(sheets):
@@ -263,6 +209,44 @@ def add_stok_routes(app, sheets_getter):
         ok = await asyncio.to_thread(sheets_getter().set_permintaan_status, str(body.get("id", "")), st)
         return web.json_response({"ok": bool(ok)})
 
+    async def laporan(request):
+        if not await _link(request, ("@owner",)):
+            return web.json_response({"ok": False}, status=404)
+        from laporan import hitung_laporan
+        try:
+            data = await asyncio.to_thread(hitung_laporan, sheets_getter(), request.query.get("bulan"))
+        except Exception:
+            logger.exception("gagal hitung laporan")
+            return web.json_response({"ok": False, "error": "Gagal ambil data"}, status=500)
+        return web.json_response(data)
+
+    async def kontrabon(request):
+        if not await _link(request, ("@owner",)):
+            return web.json_response({"ok": False}, status=404)
+        body = await request.json()
+        sheets = sheets_getter()
+        n = 0
+        for inv in [str(x) for x in (body.get("invoices") or [])][:50]:
+            if await asyncio.to_thread(sheets.tandai_kontra_bon, inv):
+                n += 1
+        return web.json_response({"ok": True, "n": n})
+
+    async def lunas(request):
+        if not await _link(request, ("@owner",)):
+            return web.json_response({"ok": False}, status=404)
+        inv = str((await request.json()).get("invoice", "")).strip()
+        sheets = sheets_getter()
+        rows = await asyncio.to_thread(sheets.get_order_items, inv)
+        status = str(rows[0].get("Status", "")) if rows else ""
+        if not rows or status != "Pending":
+            return web.json_response({"ok": False, "error": f"{inv} sudah {status or 'tidak ketemu'}"})
+        total = await asyncio.to_thread(sheets.mark_order_lunas, inv)
+        await asyncio.to_thread(sheets.add_kas_entry, "Masuk", "Penjualan", total, keterangan=f"Pelunasan {inv}", ref=inv)
+        return web.json_response({"ok": True, "total": total})
+
+    app.router.add_get("/dashboard/{token}/laporan", laporan)
+    app.router.add_post("/dashboard/{token}/kontrabon", kontrabon)
+    app.router.add_post("/dashboard/{token}/lunas", lunas)
     app.router.add_get("/dashboard/{token}/pending", pending)
     app.router.add_post("/dashboard/{token}/decide", decide)
     app.router.add_post("/dashboard/{token}/permintaan", perm_status)

@@ -2077,6 +2077,10 @@ async def reminder_job(context: ContextTypes.DEFAULT_TYPE):
     groups, singles = {}, []
     for rem in due:
         if rem.get("Jenis") == "kontra_bon":
+            # Kontra bon cukup diingetin SEKALI di hari jadwalnya. Yang kelewat
+            # gak di-spam tiap hari -- keliatan di dashboard (tab Tagihan).
+            if str(rem.get("Tanggal", ""))[:10] != today:
+                continue
             groups.setdefault(rem.get("Nama", ""), []).append(rem)
         else:
             singles.append([rem])

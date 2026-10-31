@@ -2073,21 +2073,20 @@ async def reminder_job(context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         logger.exception("gagal baca pengingat")
         return
-    chat_ids = [c for c in config.OWNER_TELEGRAM_IDS if c]
-    groups, singles = {}, []
-    for rem in due:
-        if rem.get("Jenis") == "kontra_bon":
-            # Kontra bon cukup diingetin SEKALI di hari jadwalnya. Yang kelewat
-            # gak di-spam tiap hari -- keliatan di dashboard (tab Tagihan).
-            if str(rem.get("Tanggal", ""))[:10] != today:
-                continue
-            groups.setdefault(rem.get("Nama", ""), []).append(rem)
-        else:
-            singles.append([rem])
-    batches = singles + list(groups.values())
+    chat_ids = list(dict.fromkeys(c for c in config.OWNER_TELEGRAM_IDS if c))
+    singles = [[rem] for rem in due if rem.get("Jenis") != "kontra_bon"]
+    # KONTRA BON: 1 pesan aja buat SEMUA customer & semua invoice yang belum
+    # (hari ini + yang kelewat), 1x klik beres. Dikirim sekali di hari jadwalnya.
+    kb_all = [r for r in sheets.get_active_reminders()
+              if r.get("Jenis") == "kontra_bon" and str(r.get("Tanggal", ""))[:10] <= today]
+    kb_trigger = any(str(r.get("Tanggal", ""))[:10] == today and str(r.get("Terkirim_Tgl", "")) != today for r in kb_all)
+    batches = singles + ([kb_all] if kb_trigger else [])
     for batch in batches:
         rem = batch[0]
-        text, kb = _kb_list_message(batch) if len(batch) > 1 else _reminder_message(rem)
+        if rem.get("Jenis") == "kontra_bon":
+            text, kb = _kb_digest_message(batch)
+        else:
+            text, kb = _reminder_message(rem)
         sent = False
         for chat_id in chat_ids:
             try:
@@ -2102,6 +2101,29 @@ async def reminder_job(context: ContextTypes.DEFAULT_TYPE):
                     sheets.update_reminder(r["ID"], Terkirim_Tgl=today)
             except Exception:
                 logger.exception("gagal nandain pengingat terkirim")
+
+
+def _kb_digest_message(rems):
+    """1 pesan buat semua invoice kontra bon yang belum, semua customer."""
+    by = {}
+    for r in rems:
+        by.setdefault(r.get("Nama", ""), []).append(r)
+    lines = ["📋 KONTRA BON — yang belum", ""]
+    total = 0.0
+    for nama, rs in by.items():
+        sub = sum(float(r.get("Jumlah", 0) or 0) for r in rs)
+        total += sub
+        lines.append(f"{nama} — {len(rs)} invoice • {rupiah(sub)}")
+        for r in rs[:8]:
+            lines.append(f"   • {r.get('Ref', '')} • {rupiah(r.get('Jumlah', 0))}")
+        if len(rs) > 8:
+            lines.append(f"   • ...dan {len(rs) - 8} invoice lagi")
+    lines += ["", f"Total {len(rems)} invoice • {rupiah(total)}", "",
+              f"Udah di-kontra bon semua? Sekali klik, cek pembayaran otomatis {config.KONTRABON_TEMPO_HARI} hari lagi.",
+              "(Kalau cuma sebagian, atur per invoice di dashboard → tab Tagihan.)"]
+    kb = [[InlineKeyboardButton(f"✅ Sudah kontra bon SEMUA ({len(rems)})", callback_data="rm:ALL:kbtodayall")],
+          [InlineKeyboardButton("⏳ Belum, besok lagi", callback_data="rm:ALL:kbnotoday")]]
+    return "\n".join(lines), InlineKeyboardMarkup(kb)
 
 
 def _kb_list_message(rems):
@@ -2168,6 +2190,27 @@ async def _handle_reminder_callback(update, context, data):
         return
     if act in ("kball", "kbnoall"):
         await _handle_kb_multi(update, context, data)
+        return
+    if act in ("kbtodayall", "kbnotoday"):
+        sheets = _sheets()
+        today = _wib_now().date()
+        rems = [r for r in sheets.get_active_reminders()
+                if r.get("Jenis") == "kontra_bon" and str(r.get("Tanggal", ""))[:10] <= today.strftime("%Y-%m-%d")]
+        if not rems:
+            await query.edit_message_text("✅ Kontra bon udah beres semua (udah diklik sebelumnya).")
+            return
+        if act == "kbnotoday":
+            for r in rems:
+                sheets.update_reminder(r["ID"], Tanggal=today + datetime.timedelta(days=1))
+            await query.edit_message_text(f"⏳ Oke, {len(rems)} invoice gua ingetin lagi besok jam {config.REMINDER_HOUR:02d}.00.")
+            return
+        done, due = [], None
+        for r in rems:
+            _, due = _kontrabon_done(sheets, r)
+            done.append(r.get("Ref", ""))
+        await query.edit_message_text(
+            f"✅ Kontra bon tercatat ({len(done)} invoice):\n" + "\n".join(done[:25]) +
+            f"\n\nCek pembayaran: {sc.hari_dari_tanggal(due)}, {sc.tgl_dmy(due)} ({config.KONTRABON_TEMPO_HARI} hari lagi).")
         return
     sheets = _sheets()
     rem = sheets.get_reminder(rid)

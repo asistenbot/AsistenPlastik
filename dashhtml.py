@@ -35,8 +35,24 @@ input[type=search]{width:100%;padding:10px;border:1px solid var(--ln);border-rad
 .empty{color:var(--mu);padding:8px 2px;font-size:14px}
 @media(min-width:900px){.cards{gap:12px}.card b{font-size:22px}}
 @media(max-width:700px){.cards{grid-template-columns:repeat(2,1fr)}.hb .l{flex-basis:44%}.hide-s{display:none}}
+#phead{display:none}
+@media print{
+@page{size:A4;margin:12mm}
+body{background:#fff;color:#000;font-size:11pt}
+header,.tabs,.btn,button,input[type=search],#kbSel,.noprint,td:last-child button{display:none!important}
+#phead{display:block;border-bottom:2px solid #000;margin-bottom:10px;padding-bottom:4px}#phead h1{margin:0;font-size:16pt}#phead div{font-size:10pt}
+main{max-width:none;padding:0}.pane{display:none}.pane.on{display:block}
+body.printall .pane{display:block}body.printall .pane#p_stok,body.printall .pane#p_gudang{display:none}body.printall .pane+.pane{page-break-before:always}
+.card,.box,.act,tr{break-inside:avoid;border-color:#888!important;box-shadow:none}
+.cards{grid-template-columns:repeat(4,1fr)}
+.hb .t i,.vc i,.pill{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+table{font-size:10pt}th{background:#eee!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+td input{border:0!important;background:none!important;width:auto!important;text-align:right}
+.hide-s{display:table-cell!important}
+}
 </style></head><body>
-<header><h1>📊 __BIZ__</h1><input type="month" id="bln" placeholder="2026-10" pattern="[0-9]{4}-[0-9]{2}"></header>
+<header><h1>📊 __BIZ__</h1><button class="btn k" id="pr1">🖨️ Cetak halaman ini</button><button class="btn k" id="prAll">🖨️ Cetak semua laporan</button><input type="month" id="bln" placeholder="2026-10" pattern="[0-9]{4}-[0-9]{2}"></header>
+<div id="phead"><h1>__BIZ__</h1><div id="phinfo"></div></div>
 <div class="tabs" id="tabs"></div>
 <main>
 <div class="pane" id="p_ringkasan"></div>
@@ -117,6 +133,10 @@ document.getElementById('p_kas').innerHTML=h}
 async function loadLap(){const bl=document.getElementById('bln').value;try{const r=await fetch(B+'/laporan?bulan='+encodeURIComponent(bl));const j=await r.json();if(!j.ok)throw 0;L=j;if(!bl)document.getElementById('bln').value=j.bulan;
 renderRingkasan();renderPenjualan();renderTagihan();renderUtang();renderKas()}catch(e){document.getElementById('p_ringkasan').innerHTML='<div class="box">Gagal ambil laporan. Coba refresh sebentar lagi (Google Sheets lagi sibuk).</div>'}}
 document.getElementById('bln').onchange=loadLap;
+function cetak(all){const nm=(TABS.find(t=>t[0]==TAB)||['',''])[1].replace(/^\S+\s/,'');
+document.getElementById('phinfo').textContent=(all?'Laporan lengkap':nm)+' — '+(L?L.bulan_label:'')+' • dicetak '+new Date().toLocaleString('id-ID');
+document.body.classList.toggle('printall',!!all);setTimeout(()=>{window.print();setTimeout(()=>document.body.classList.remove('printall'),500)},100)}
+document.getElementById('pr1').onclick=()=>cetak(false);document.getElementById('prAll').onclick=()=>cetak(true);
 
 document.addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;
 if(b.id=='kbSel'){const v=[...document.querySelectorAll('.kbc:checked')].map(x=>x.value);if(!v.length){alert('Centang dulu invoice yang udah di-kontra bon.');return}

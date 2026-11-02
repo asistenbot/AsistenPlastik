@@ -286,6 +286,16 @@ def add_stok_routes(app, sheets_getter):
         seg = await asyncio.to_thread(struk_surat_jalan, sheets_getter(), request.match_info["inv"])
         return web.json_response({"ok": bool(seg), "seg": seg or [], "error": "" if seg else "Invoice tidak ketemu"})
 
+    async def tandai_kirim(request):
+        if not await _link(request, ("@owner",)):
+            return web.json_response({"ok": False}, status=404)
+        body = await request.json()
+        sheets = sheets_getter()
+        invs = [str(x).strip()[:40] for x in (body.get("invoices") or [])][:1000]
+        n = await asyncio.to_thread(sheets.set_pengiriman_banyak, invs, "Owner (dashboard)")
+        return web.json_response({"ok": True, "n": n})
+
+    app.router.add_post("/dashboard/{token}/kirim", tandai_kirim)
     app.router.add_get("/dashboard/{token}/struk/{inv}", struk)
     app.router.add_get("/dashboard/{token}/dok/{inv}/{kind}", dokumen)
     app.router.add_get("/dashboard/{token}/laporan", laporan)

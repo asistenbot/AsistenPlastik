@@ -237,5 +237,6 @@ def hitung_laporan(sheets, bulan=None):
         "utang_supplier": [{"nama": k, "total": v} for k, v in _top(utang, 20)],
         "kas_masuk_kat": [{"nama": k, "total": v} for k, v in _top(lap["masuk_by_kategori"])],
         "kas_keluar_kat": [{"nama": k, "total": v} for k, v in _top(lap["keluar_by_kategori"])],
-        "kas_list": kas_list, "web_list": web_menunggu, "belum_kirim_list": belum_kirim[:40], "stok_bermasalah": len(pernah),
+        "kas_list": kas_list, "web_list": web_menunggu, "belum_kirim_list": belum_kirim[:40],
+        "belum_kirim_all": [d["invoice"] for d in belum_kirim], "stok_bermasalah": len(pernah),
     }

@@ -1700,6 +1700,15 @@ class SheetsClient:
                 return
         ws.append_row([no_invoice, "Dikirim", staff, _now_str()], value_input_option="RAW")
 
+    def set_pengiriman_banyak(self, invoices, staff):
+        """Tandai banyak invoice 'Dikirim' sekaligus (1x baca, 1x tulis)."""
+        ws = self._ws(config.SHEET_PENGIRIMAN)
+        ada = {row[0] for row in ws.get_all_values()[1:] if row}
+        baru = [[inv, "Dikirim", staff, _now_str()] for inv in dict.fromkeys(invoices) if inv and inv not in ada]
+        if baru:
+            ws.append_rows(baru, value_input_option="RAW")
+        return len(baru)
+
     def get_orders_gudang(self, limit=40):
         """Order customer yang gak Batal, dikelompokin per invoice, terbaru dulu."""
         by = {}

@@ -321,9 +321,9 @@ def _vector_pdf(pages):
     if "DVMonoBold" not in pdfmetrics.getRegisteredFontNames():
         pdfmetrics.registerFont(TTFont("DVMonoBold", os.path.join(BASE_DIR, "fonts", "DejaVuSansMono-Bold.ttf")))
     W, H = 8.5 * 72, 5.5 * 72
-    cw, lh = 7.2, 12.0                      # 10 cpi, 6 lpi
+    cw, lh = 7.0, 12.0                      # ±10 cpi (sedikit rapat biar 80 kolom muat di area cetak LX-310), 6 lpi
     size = cw / 0.602
-    x0, top = 18.0, 14.4
+    x0, top = 14.0, 14.4                    # 80 kolom selesai di ±7,97 inch
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=(W, H))
     for lines, _, title in pages:
@@ -361,7 +361,8 @@ def _vector_pdf(pages):
         tsize = size * 2
         tw = pdfmetrics.stringWidth(title, "DVMonoBold", tsize)
         c.setFont("DVMonoBold", tsize)
-        c.drawString(x0 + COLS * cw - tw, H - top - lh - lh / 2 - tsize * 0.28, title)
+        # ujung judul ditarik ke kiri (kolom 72) biar gak kepotong di sisi kanan printer
+        c.drawString(x0 + (COLS - 8) * cw - tw, H - top - lh - lh / 2 - tsize * 0.28, title)
         c.showPage()
     c.save()
     buf.seek(0)

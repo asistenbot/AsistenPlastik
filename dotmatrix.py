@@ -329,8 +329,12 @@ def _vector_pdf(pages):
     size = cw / 0.602
     # isi pakai huruf BIASA (bukan tebal) & sedikit lebih kecil dari lebar kolom,
     # biar di mode cepat 120x72 dpi hurufnya gak dempet/mblobor
-    bsize = (cw / 0.6) * 0.92
-    bspace = cw - 0.6 * bsize
+    # huruf dibikin LEBIH TINGGI tapi lebarnya tetap (horizontal scale < 100%):
+    # di mode cepat 120x72 dpi resolusi tegaknya kecil, jadi tinggi huruf nambah
+    # titik -> angka 0/3/6/8/9 jauh lebih kebaca
+    bsize = float(os.environ.get("DM_BSIZE", "13.2"))
+    hs = (cw * 0.92) / (0.6 * bsize)          # skala lebar (mis. 0,81)
+    bspace = cw / hs - 0.6 * bsize
     x0, top = 14.0, 26.4                    # 80 kolom selesai di ±7,97 inch; atas ±0,37 inch
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=(W, H))
@@ -340,7 +344,7 @@ def _vector_pdf(pages):
         c.setFont("LibMonoBold", bsize)
         for li, s_ in enumerate(lines):
             ymid = H - top - li * lh - lh / 2
-            base = ymid - bsize * 0.28
+            base = ymid - bsize * 0.26
             run = ""
             start = 0
             for ci, ch in enumerate(s_ + "\0"):
@@ -363,6 +367,7 @@ def _vector_pdf(pages):
                 t = c.beginText(x0, base)
                 t.setFont("LibMonoBold", bsize)
                 t.setCharSpace(bspace)
+                t.setHorizScale(hs * 100)
                 t.textOut(text.rstrip())
                 c.drawText(t)
         # judul besar (2x) di kanan, mulai baris ke-2

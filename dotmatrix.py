@@ -23,7 +23,7 @@ FONT_PATH = os.path.join(BASE_DIR, "fonts", "DejaVuSansMono.ttf")
 
 COLS = 80            # kolom per baris (10 cpi x 8 inch)
 INNER = COLS - 2     # isi di dalam bingkai
-PAGE_LINES = 31      # 5,5 inch x 6 baris/inch = 33, sisain 2 baris buat margin atas/bawah
+PAGE_LINES = 30      # 5,5 inch x 6 baris/inch = 33, sisain 3 baris buat margin atas/bawah
 
 # ---- ukuran gambar preview (360 dpi, kertas 8,5 x 5,5 inch) ----
 CW, LH = 36, 60
@@ -320,19 +320,25 @@ def _vector_pdf(pages):
     from reportlab.pdfbase.ttfonts import TTFont
     if "DVMonoBold" not in pdfmetrics.getRegisteredFontNames():
         pdfmetrics.registerFont(TTFont("DVMonoBold", os.path.join(BASE_DIR, "fonts", "DejaVuSansMono-Bold.ttf")))
+    if "DVMono" not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont("DVMono", FONT_PATH))
     W, H = 8.5 * 72, 5.5 * 72
     cw, lh = 7.0, 12.0                      # ±10 cpi (sedikit rapat biar 80 kolom muat di area cetak LX-310), 6 lpi
     size = cw / 0.602
-    x0, top = 14.0, 14.4                    # 80 kolom selesai di ±7,97 inch
+    # isi pakai huruf BIASA (bukan tebal) & sedikit lebih kecil dari lebar kolom,
+    # biar di mode cepat 120x72 dpi hurufnya gak dempet/mblobor
+    bsize = size * 0.9
+    bspace = cw - 0.602 * bsize
+    x0, top = 14.0, 26.4                    # 80 kolom selesai di ±7,97 inch; atas ±0,37 inch
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=(W, H))
     for lines, _, title in pages:
         c.setFillColorRGB(0, 0, 0)
         c.setStrokeColorRGB(0, 0, 0)
-        c.setFont("DVMonoBold", size)
+        c.setFont("DVMono", bsize)
         for li, s_ in enumerate(lines):
             ymid = H - top - li * lh - lh / 2
-            base = ymid - size * 0.28
+            base = ymid - bsize * 0.28
             run = ""
             start = 0
             for ci, ch in enumerate(s_ + "\0"):
@@ -353,8 +359,8 @@ def _vector_pdf(pages):
             text = "".join(" " if ch in ("─", "═") else ch for ch in s_)
             if text.strip():
                 t = c.beginText(x0, base)
-                t.setFont("DVMonoBold", size)
-                t.setCharSpace(0)
+                t.setFont("DVMono", bsize)
+                t.setCharSpace(bspace)
                 t.textOut(text.rstrip())
                 c.drawText(t)
         # judul besar (2x) di kanan, mulai baris ke-2

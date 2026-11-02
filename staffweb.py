@@ -42,7 +42,7 @@ def _read_cookie(request):
 
 
 STAFF_HTML = """<!doctype html><html lang="id"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Panel Gudang</title><style>
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Panel Gudang</title><link rel="manifest" href="/staff/manifest.json"><meta name="theme-color" content="#0f7b6c"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Gudang"><link rel="apple-touch-icon" href="/staff/icon-192.png"><style>
 :root{--g:#0f7b6c;--bg:#f4f7f6;--ink:#1c2b28;--mu:#6b7c78;--ln:#dbe4e1}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,sans-serif}
 header{background:var(--g);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px}header h1{margin:0;font-size:18px;flex:1}
@@ -339,6 +339,39 @@ def add_staff_routes(app, sheets_getter, notify):
     app.router.add_get("/staff/api/doktxt/{inv}", dok_sj_txt)
     app.router.add_get("/staff/api/dok/{inv}", dok_sj)
     app.router.add_post("/staff/api/ganti", ganti)
+    async def manifest(request):
+        return web.json_response({
+            "name": "Panel Gudang " + config.BUSINESS_NAME, "short_name": "Gudang",
+            "start_url": "/staff", "scope": "/staff", "display": "standalone",
+            "orientation": "any", "background_color": "#f4f7f6", "theme_color": "#0f7b6c",
+            "icons": [{"src": "/staff/icon-192.png", "sizes": "192x192", "type": "image/png"},
+                      {"src": "/staff/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}]},
+            content_type="application/manifest+json")
+
+    _ikon = {}
+
+    async def icon(request):
+        n = 512 if request.match_info["n"] == "512" else 192
+        if n not in _ikon:
+            import io
+            import os
+            from PIL import Image, ImageDraw, ImageFont
+            im = Image.new("RGB", (n, n), (15, 123, 108))
+            d = ImageDraw.Draw(im)
+            f = ImageFont.truetype(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts",
+                                                "DejaVuSans-Bold.ttf"), int(n * 0.36))
+            t = "AS"
+            w = d.textlength(t, font=f)
+            d.text(((n - w) / 2, n * 0.27), t, font=f, fill="white")
+            d.rectangle([n * 0.22, n * 0.72, n * 0.78, n * 0.76], fill="white")
+            buf = io.BytesIO()
+            im.save(buf, "PNG")
+            _ikon[n] = buf.getvalue()
+        return web.Response(body=_ikon[n], content_type="image/png",
+                            headers={"Cache-Control": "public, max-age=86400"})
+
+    app.router.add_get("/staff/manifest.json", manifest)
+    app.router.add_get("/staff/icon-{n}.png", icon)
     app.router.add_get("/staff", page)
     app.router.add_post("/staff/api/login", login)
     app.router.add_post("/staff/api/logout", logout)

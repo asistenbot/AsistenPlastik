@@ -320,22 +320,24 @@ def _vector_pdf(pages):
     from reportlab.pdfbase.ttfonts import TTFont
     if "DVMonoBold" not in pdfmetrics.getRegisteredFontNames():
         pdfmetrics.registerFont(TTFont("DVMonoBold", os.path.join(BASE_DIR, "fonts", "DejaVuSansMono-Bold.ttf")))
-    if "DVMono" not in pdfmetrics.getRegisteredFontNames():
-        pdfmetrics.registerFont(TTFont("DVMono", FONT_PATH))
+    if "LibMonoBold" not in pdfmetrics.getRegisteredFontNames():
+        # Liberation Mono Bold: angka 0 polos (tanpa titik/garis), tebal sedang,
+        # tetap kebaca di mode cepat 120x72 dpi
+        pdfmetrics.registerFont(TTFont("LibMonoBold", os.path.join(BASE_DIR, "fonts", "LiberationMono-Bold.ttf")))
     W, H = 8.5 * 72, 5.5 * 72
     cw, lh = 7.0, 12.0                      # ±10 cpi (sedikit rapat biar 80 kolom muat di area cetak LX-310), 6 lpi
     size = cw / 0.602
     # isi pakai huruf BIASA (bukan tebal) & sedikit lebih kecil dari lebar kolom,
     # biar di mode cepat 120x72 dpi hurufnya gak dempet/mblobor
-    bsize = size * 0.9
-    bspace = cw - 0.602 * bsize
+    bsize = (cw / 0.6) * 0.92
+    bspace = cw - 0.6 * bsize
     x0, top = 14.0, 26.4                    # 80 kolom selesai di ±7,97 inch; atas ±0,37 inch
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=(W, H))
     for lines, _, title in pages:
         c.setFillColorRGB(0, 0, 0)
         c.setStrokeColorRGB(0, 0, 0)
-        c.setFont("DVMono", bsize)
+        c.setFont("LibMonoBold", bsize)
         for li, s_ in enumerate(lines):
             ymid = H - top - li * lh - lh / 2
             base = ymid - bsize * 0.28
@@ -359,14 +361,14 @@ def _vector_pdf(pages):
             text = "".join(" " if ch in ("─", "═") else ch for ch in s_)
             if text.strip():
                 t = c.beginText(x0, base)
-                t.setFont("DVMono", bsize)
+                t.setFont("LibMonoBold", bsize)
                 t.setCharSpace(bspace)
                 t.textOut(text.rstrip())
                 c.drawText(t)
         # judul besar (2x) di kanan, mulai baris ke-2
         tsize = size * 2
-        tw = pdfmetrics.stringWidth(title, "DVMonoBold", tsize)
-        c.setFont("DVMonoBold", tsize)
+        tw = pdfmetrics.stringWidth(title, "LibMonoBold", tsize)
+        c.setFont("LibMonoBold", tsize)
         # ujung judul ditarik ke kiri (kolom 72) biar gak kepotong di sisi kanan printer
         c.drawString(x0 + (COLS - 8) * cw - tw, H - top - lh - lh / 2 - tsize * 0.28, title)
         c.showPage()

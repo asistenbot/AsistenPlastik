@@ -115,7 +115,7 @@ $('go').onclick=async()=>{if(!confirm('Kirim hasil cek PO '+p.po+' ke owner?'))r
 $('go').disabled=true;const r=await api('terimapo',{po:p.po,catatan:$('cat').value,entries});
 if(r.ok){alert('✅ Terkirim ke owner, nunggu disetujui');poSel=null;tab='riwayat';await boot()}else{alert(r.error||'Gagal');$('go').disabled=false}};return}
 if(tab=='pesanan'){let h='<div class="info">Pesanan customer yang harus disiapkan. Setelah barang keluar gudang, tekan <b>Sudah dikirim</b>.</div>';
-D.orders.forEach(o=>{h+='<div class="card"><b>'+esc(o.customer)+' <span class="badge '+(o.dikirim?'Dikirim':'Menunggu')+'">'+(o.dikirim?'Dikirim':'Belum dikirim')+'</span></b><small>'+esc(o.invoice)+' • '+esc(o.tgl)+(o.kirim?' • kirim '+esc(o.kirim):'')+' • '+esc(o.metode)+'</small><div style="margin:6px 0">'+o.items.map(i=>'• '+esc(i.nama)+' — <b>'+esc(i.qty)+' '+esc(i.satuan)+'</b>').join('<br>')+'</div>'+(o.alamat?'<small>📍 '+esc(o.alamat)+'</small><br>':'')+(o.dikirim?'<small>oleh '+esc(o.dikirim_oleh)+' • '+esc(o.dikirim_waktu)+'</small>':'<button class="btn sm" data-k="'+esc(o.invoice)+'">✅ Sudah dikirim</button>')+' <a class="btn sm" style="text-decoration:none;display:inline-block;background:#555;color:#fff" target="_blank" rel="noopener" href="/staff/api/dok/'+encodeURIComponent(o.invoice)+'">🖨️ Surat Jalan</a> <button class="btn sm" style="background:#2a6fb5" data-th="'+esc(o.invoice)+'">📠 Thermal 58mm</button></div>'});
+D.orders.forEach(o=>{h+='<div class="card"><b>'+esc(o.customer)+' <span class="badge '+(o.dikirim?'Dikirim':'Menunggu')+'">'+(o.dikirim?'Dikirim':'Belum dikirim')+'</span></b><small>'+esc(o.invoice)+' • '+esc(o.tgl)+(o.kirim?' • kirim '+esc(o.kirim):'')+' • '+esc(o.metode)+'</small><div style="margin:6px 0">'+o.items.map(i=>'• '+esc(i.nama)+' — <b>'+esc(i.qty)+' '+esc(i.satuan)+'</b>').join('<br>')+'</div>'+(o.alamat?'<small>📍 '+esc(o.alamat)+'</small><br>':'')+(o.dikirim?'<small>oleh '+esc(o.dikirim_oleh)+' • '+esc(o.dikirim_waktu)+'</small>':'<button class="btn sm" data-k="'+esc(o.invoice)+'">✅ Sudah dikirim</button>')+' <a class="btn sm" style="text-decoration:none;display:inline-block;background:#555;color:#fff" target="_blank" rel="noopener" href="/staff/api/dok/'+encodeURIComponent(o.invoice)+'">🖨️ Surat Jalan</a> <a class="btn sm" style="text-decoration:none;display:inline-block;background:#555;color:#fff" href="/staff/api/doktxt/'+encodeURIComponent(o.invoice)+'">📝 SJ teks</a> <button class="btn sm" style="background:#2a6fb5" data-th="'+esc(o.invoice)+'">📠 Thermal 58mm</button></div>'});
 m.innerHTML=(h||'<p>Belum ada pesanan.</p>')+'<p class="mu" style="text-align:center">📠 Thermal: pakai Chrome di Android, printer nyala. <button class="lnk" id="gp">Ganti printer</button></p>';$('gp').onclick=()=>window.gantiPrinterThermal&&gantiPrinterThermal();m.querySelectorAll('[data-th]').forEach(b=>b.onclick=()=>cetakThermal('/staff/api/struk/'+encodeURIComponent(b.dataset.th),b));m.querySelectorAll('[data-k]').forEach(b=>b.onclick=async()=>{if(!confirm('Barang untuk '+b.dataset.k+' sudah keluar & dikirim?'))return;b.disabled=true;const r=await api('kirim',{invoice:b.dataset.k});if(r.ok)boot();else alert(r.error||'Gagal')});return}
 if(tab=='riwayat'){let h='<div class="info">Pengajuan stok kamu. <b>Menunggu</b> = belum disetujui owner.</div>';
 const by={};D.pengajuan.forEach(p=>{(by[p.Batch]=by[p.Batch]||[]).push(p)});Object.keys(by).reverse().forEach(b=>{const L=by[b];h+='<div class="card"><b>'+esc(L[0].Jenis=='Masuk'?'Barang Masuk':'Hitung Stok')+' <span class="badge '+esc(L[0].Status)+'">'+esc(L[0].Status)+'</span></b><small>'+esc(L[0].Waktu)+(L[0].Ref?' • '+esc(L[0].Ref):'')+'</small><div style="margin-top:5px">'+L.map(p=>'• '+esc(p.Nama)+': <b>'+esc(p.Qty)+' '+esc(p.Satuan)+'</b>').join('<br>')+'</div></div>'});
@@ -325,6 +325,18 @@ def add_staff_routes(app, sheets_getter, notify):
         return web.json_response({"ok": bool(seg), "seg": seg or [], "error": "" if seg else "Invoice tidak ketemu"})
 
     app.router.add_get("/staff/api/struk/{inv}", struk)
+    async def dok_sj_txt(request):
+        if not await _auth(request):
+            return web.Response(status=401, text="Login dulu.")
+        from docbuild import bangun_txt
+        hasil = await asyncio.to_thread(bangun_txt, sheets_getter(), request.match_info["inv"], "sj")
+        if not hasil:
+            return web.Response(status=404, text="Invoice tidak ketemu.")
+        nama, data = hasil
+        return web.Response(body=data, content_type="text/plain", charset="ascii",
+                            headers={"Content-Disposition": f'attachment; filename="{nama}"'})
+
+    app.router.add_get("/staff/api/doktxt/{inv}", dok_sj_txt)
     app.router.add_get("/staff/api/dok/{inv}", dok_sj)
     app.router.add_post("/staff/api/ganti", ganti)
     app.router.add_get("/staff", page)

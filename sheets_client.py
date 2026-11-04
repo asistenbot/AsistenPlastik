@@ -1526,7 +1526,15 @@ class SheetsClient:
             rows = [r for r in rows if str(r.get("Staff", "")) == staff]
         return rows
 
+    _putus_lock = threading.Lock()
+
     def decide_pengajuan(self, batch, approve, oleh="owner"):
+        """Setujui/tolak 1 batch (cuma yang masih 'Menunggu', jadi gak bisa dobel).
+        Dikunci biar klik Telegram & dashboard barengan tetap cuma 1 yang jalan."""
+        with self._putus_lock:
+            return self._decide_pengajuan(batch, approve, oleh)
+
+    def _decide_pengajuan(self, batch, approve, oleh="owner"):
         """Setujui/tolak 1 batch. Kalau disetujui -> masuk ke MutasiStok. Balikin jumlah baris, atau None."""
         from gspread.utils import rowcol_to_a1
         ws = self._ws(config.SHEET_PENGAJUAN)

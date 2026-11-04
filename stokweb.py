@@ -81,7 +81,7 @@ def _stok_items(sheets):
     return items
 
 
-def add_stok_routes(app, sheets_getter):
+def add_stok_routes(app, sheets_getter, notify=None):
     async def _link(request, perans):
         sheets = sheets_getter()
         link = await asyncio.to_thread(sheets.get_link_by_token, request.match_info["token"])
@@ -214,9 +214,13 @@ def add_stok_routes(app, sheets_getter):
         if not await _link(request, ("@owner",)):
             return web.json_response({"ok": False}, status=404)
         body = await request.json()
-        n = await asyncio.to_thread(sheets_getter().decide_pengajuan, str(body.get("batch", "")),
-                                    bool(body.get("approve")), "owner (dashboard)")
-        _clear = getattr(sheets_getter(), "_data_cache", None)
+        batch, approve = str(body.get("batch", "")), bool(body.get("approve"))
+        n = await asyncio.to_thread(sheets_getter().decide_pengajuan, batch, approve, "owner (dashboard)")
+        if n is not None and notify is not None:
+            try:
+                await notify("diputuskan", {"batch": batch, "approve": approve, "n": n})
+            except Exception:
+                logger.exception("gagal update pesan Telegram pengajuan")
         return web.json_response({"ok": n is not None})
 
     async def perm_status(request):

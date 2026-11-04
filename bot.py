@@ -620,12 +620,12 @@ async def _mirror(bot, kunci, skip_chat=None, skip_thread=None, **kw):
         if doc is not None and hasattr(doc, "seek"):
             doc.seek(0)
         if "text" in kw:
-            await bot.send_message(chat_id=chat, text=kw["text"], reply_markup=kw.get("reply_markup"), **extra)
+            return await bot.send_message(chat_id=chat, text=kw["text"], reply_markup=kw.get("reply_markup"), **extra)
         elif doc is not None:
-            await bot.send_document(chat_id=chat, document=doc, filename=kw.get("filename"),
-                                    caption=kw.get("caption"), **extra)
+            return await bot.send_document(chat_id=chat, document=doc, filename=kw.get("filename"),
+                                           caption=kw.get("caption"), **extra)
         elif "photo" in kw:
-            await bot.send_photo(chat_id=chat, photo=kw["photo"], caption=kw.get("caption"), **extra)
+            return await bot.send_photo(chat_id=chat, photo=kw["photo"], caption=kw.get("caption"), **extra)
     except Exception:
         logger.exception("gagal mirror ke topik %s", kunci)
 
@@ -1540,11 +1540,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         batch = data.split(":", 1)[1]
         n = _sheets().decide_pengajuan(batch, approve, f"owner (Telegram)")
         if n is None:
-            await query.edit_message_text(f"Pengajuan {batch} udah diputuskan sebelumnya.")
+            await query.edit_message_text(f"Pengajuan {batch} udah diputuskan sebelumnya (lewat dashboard / Telegram).")
         else:
             await query.edit_message_text(
                 f"{'✅ Disetujui' if approve else '❌ Ditolak'}: pengajuan {batch} ({n} barang)."
                 + (" Stok sudah diperbarui." if approve else ""))
+            m = query.message
+            await _tutup_pesan_pengajuan(context.bot, batch, approve, n, "Telegram",
+                                         skip=(m.chat_id, m.message_id) if m else None)
         return
 
     if data == "hk_no":
@@ -2511,14 +2514,47 @@ async def _notify_staff_event(app, kind, data):
         text = f"🛒 {data['staff']} minta barang (perlu dipesan):\n\n{baris}"
     elif kind == "kirim":
         text = f"🚚 {data['staff']} menandai {data['invoice']} ({data['customer']}) sudah dikirim."
+    elif kind == "diputuskan":
+        # disetujui/ditolak dari dashboard -> ilangin tombol di semua pesan Telegram-nya
+        await _tutup_pesan_pengajuan(app.bot, data["batch"], data["approve"], data.get("n"), "dashboard")
+        return
     else:
         return
-    for chat_id in [c for c in config.OWNER_TELEGRAM_IDS if c]:
+    refs = []
+    for chat_id in list(dict.fromkeys(c for c in config.OWNER_TELEGRAM_IDS if c)):
         try:
-            await app.bot.send_message(chat_id=chat_id, text=text, reply_markup=markup)
+            m = await app.bot.send_message(chat_id=chat_id, text=text, reply_markup=markup)
+            refs.append((m.chat_id, m.message_id))
         except Exception:
             logger.exception("gagal kirim kabar staff ke %s", chat_id)
-    await _mirror(app.bot, "stok", text=text, reply_markup=markup)
+    m = await _mirror(app.bot, "stok", text=text, reply_markup=markup)
+    if m is not None:
+        refs.append((m.chat_id, m.message_id))
+    if kind == "pengajuan" and refs:
+        import asyncio
+        try:
+            await asyncio.to_thread(_sheets().set_pesan_tg, data["batch"], refs)
+        except Exception:
+            logger.exception("gagal simpen id pesan pengajuan")
+
+
+async def _tutup_pesan_pengajuan(bot, batch, approve, n, lewat, skip=None):
+    """Ganti semua pesan 'Setujui/Tolak' batch ini jadi status akhir (tanpa tombol)."""
+    import asyncio
+    try:
+        refs = await asyncio.to_thread(_sheets().get_pesan_tg, batch)
+    except Exception:
+        logger.exception("gagal baca id pesan pengajuan")
+        return
+    teks = (f"{'✅ Disetujui' if approve else '❌ Ditolak'} lewat {lewat}: pengajuan {batch}"
+            + (f" ({n} barang)." if n else ".") + (" Stok sudah diperbarui." if approve else ""))
+    for chat_id, msg_id in refs:
+        if skip and (chat_id, msg_id) == skip:
+            continue
+        try:
+            await bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=teks)
+        except Exception as e:
+            logger.info("gak bisa edit pesan pengajuan %s/%s: %s", chat_id, msg_id, e)
 
 
 @owner_only

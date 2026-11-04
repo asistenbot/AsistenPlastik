@@ -64,7 +64,7 @@ SCHEMA = {
     config.SHEET_TOPIK: ["Kunci", "Chat_ID", "Thread_ID"],
     config.SHEET_STAFF: ["ID", "Nama", "Hash", "Salt", "Aktif", "Dibuat"],
     config.SHEET_PENGAJUAN: ["ID", "Batch", "Waktu", "Staff", "Jenis", "Item_Code", "Nama", "Qty", "Satuan",
-                             "Ref", "Status", "Diputuskan_Oleh", "Diputuskan_Waktu"],
+                             "Ref", "Status", "Diputuskan_Oleh", "Diputuskan_Waktu", "Pesan_TG"],
     config.SHEET_PENERIMAAN: ["No_PO", "Status", "Batch", "Staff", "Waktu", "Catatan", "Peta"],
     config.SHEET_PERMINTAAN: ["ID", "Waktu", "Staff", "Item_Code", "Nama", "Qty", "Satuan", "Catatan", "Status"],
     config.SHEET_PENGIRIMAN: ["No_Invoice", "Status", "Staff", "Waktu"],
@@ -1484,9 +1484,39 @@ class SheetsClient:
         batch = "B" + uuid.uuid4().hex[:6].upper()
         ts = _now_str()
         rows = [[f"{batch}-{i + 1}", batch, ts, staff, jenis, e["item_code"], e.get("nama", ""), e["qty"],
-                 e.get("satuan", ""), ref, "Menunggu", "", ""] for i, e in enumerate(entries)]
+                 e.get("satuan", ""), ref, "Menunggu", "", "", ""] for i, e in enumerate(entries)]
         self._ws(config.SHEET_PENGAJUAN).append_rows(rows, value_input_option="RAW")
         return batch
+
+    def set_pesan_tg(self, batch, refs):
+        """Simpen id pesan Telegram (chat:msg;...) buat 1 batch pengajuan, biar
+        tombolnya bisa diilangin kalau udah diputuskan dari tempat lain."""
+        from gspread.utils import rowcol_to_a1
+        ws = self._ws(config.SHEET_PENGAJUAN)
+        values = ws.get_all_values()
+        if not values or "Pesan_TG" not in values[0]:
+            return False
+        h = values[0]
+        cb, cp = h.index("Batch"), h.index("Pesan_TG")
+        for i, row in enumerate(values[1:], start=2):
+            if len(row) > cb and row[cb] == batch:
+                ws.batch_update([{"range": rowcol_to_a1(i, cp + 1),
+                                  "values": [[";".join(f"{c}:{m}" for c, m in refs)]]}])
+                return True
+        return False
+
+    def get_pesan_tg(self, batch):
+        for r in self._records(self._ws(config.SHEET_PENGAJUAN)):
+            if str(r.get("Batch", "")) == batch and str(r.get("Pesan_TG", "")).strip():
+                out = []
+                for part in str(r["Pesan_TG"]).split(";"):
+                    try:
+                        c, m = part.rsplit(":", 1)
+                        out.append((int(c), int(m)))
+                    except ValueError:
+                        continue
+                return out
+        return []
 
     def get_pengajuan(self, status=None, staff=None):
         rows = self._records(self._ws(config.SHEET_PENGAJUAN))

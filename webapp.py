@@ -210,7 +210,7 @@ def make_web_app(sheets_getter, on_order, on_staff_event=None):
     app = web.Application(client_max_size=256 * 1024)
     import stokweb
     import staffweb
-    stokweb.add_stok_routes(app, sheets_getter)
+    stokweb.add_stok_routes(app, sheets_getter, on_staff_event)
     async def _noop(kind, data):
         return None
     staffweb.add_staff_routes(app, sheets_getter, on_staff_event or _noop)

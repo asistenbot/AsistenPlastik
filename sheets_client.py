@@ -65,7 +65,7 @@ SCHEMA = {
     config.SHEET_STAFF: ["ID", "Nama", "Hash", "Salt", "Aktif", "Dibuat"],
     config.SHEET_PENGAJUAN: ["ID", "Batch", "Waktu", "Staff", "Jenis", "Item_Code", "Nama", "Qty", "Satuan",
                              "Ref", "Status", "Diputuskan_Oleh", "Diputuskan_Waktu"],
-    config.SHEET_PENERIMAAN: ["No_PO", "Status", "Batch", "Staff", "Waktu", "Catatan"],
+    config.SHEET_PENERIMAAN: ["No_PO", "Status", "Batch", "Staff", "Waktu", "Catatan", "Peta"],
     config.SHEET_PERMINTAAN: ["ID", "Waktu", "Staff", "Item_Code", "Nama", "Qty", "Satuan", "Catatan", "Status"],
     config.SHEET_PENGIRIMAN: ["No_Invoice", "Status", "Staff", "Waktu"],
     config.SHEET_LINKORDER: ["Token", "Nama_Customer", "Aktif", "Dibuat", "Catatan"],
@@ -1577,51 +1577,113 @@ class SheetsClient:
     def _po_terbuka_rows(self):
         return [r for r in self.get_all_pos() if str(r.get("Status", "")) != "Batal" and str(r.get("No_PO", "")).strip()]
 
-    def get_penerimaan_map(self):
-        """{no_po: baris terakhir yang statusnya BUKAN Ditolak} -> Menunggu / Diterima."""
-        out = {}
-        for r in self._records(self._ws(config.SHEET_PENERIMAAN)):
-            if str(r.get("Status", "")) == "Ditolak":
+    def _po_lines(self):
+        """{no_po: info} buat semua PO yang gak Batal, lengkap dengan berapa yang
+        SUDAH diterima (pengajuan disetujui) per baris -- jadi PO bisa datang
+        nyicil (misal pesan 5000, datang 1000 dulu)."""
+        import json as _json
+        produk = [p for p in self.get_price_list() if str(p.get("Item_Code", "")).strip()]
+        by_code = {str(p["Item_Code"]).strip().upper(): p for p in produk}
+        pen = self._records(self._ws(config.SHEET_PENERIMAAN))
+        peta, menunggu, ditutup = {}, set(), set()
+        for r in pen:
+            no, st = str(r.get("No_PO", "")), str(r.get("Status", ""))
+            if st == "Ditolak":
                 continue
-            out[str(r.get("No_PO", ""))] = r
+            if st == "Menunggu":
+                menunggu.add(no)
+            if st == "Ditutup":
+                ditutup.add(no)
+            try:
+                for k, v in (_json.loads(r.get("Peta") or "{}") or {}).items():
+                    if v:
+                        peta.setdefault(no, {})[_norm(k)] = str(v).strip().upper()
+            except (ValueError, AttributeError):
+                pass
+        diterima = {}
+        for r in self._records(self._ws(config.SHEET_PENGAJUAN)):
+            if str(r.get("Status", "")) != "Disetujui":
+                continue
+            ref = str(r.get("Ref", "")).strip()
+            if not ref.upper().startswith(config.PO_PREFIX):
+                continue
+            k = str(r.get("Item_Code", "")).strip().upper()
+            diterima.setdefault(ref, {})
+            diterima[ref][k] = diterima[ref].get(k, 0.0) + self._f(r.get("Qty"))
+        out = {}
+        for r in self._po_terbuka_rows():
+            no = str(r["No_PO"]).strip()
+            d = out.setdefault(no, {"po": no, "supplier": str(r.get("Nama_Supplier", "")),
+                                    "tgl": str(r.get("Timestamp", ""))[:10], "items": [],
+                                    "menunggu": no in menunggu, "ditutup": no in ditutup})
+            nama = str(r.get("Item", ""))
+            p = self._cocok_produk(nama, produk)
+            code = str(p["Item_Code"]).strip() if p else ""
+            if not p and _norm(nama) in peta.get(no, {}):
+                p = by_code.get(peta[no][_norm(nama)])
+                code = str(p["Item_Code"]).strip() if p else ""
+            qty = self._f(r.get("Qty"))
+            sat = str(r.get("Satuan", "") or "")
+            isi = self._f((p or {}).get("Isi_Bal"))
+            unit = "bal" if (p and isi > 0 and sat.strip().lower() == "bal") else "sat"
+            kali = isi if unit == "bal" else 1.0
+            d["items"].append({"nama": nama, "qty": qty, "satuan": sat, "code": code, "unit": unit,
+                               "kali": kali, "pesan_stok": qty * kali,
+                               "satuan_stok": str((p or {}).get("Satuan", "") or sat),
+                               "_p": p})
+        # bagi yang udah diterima ke baris-baris PO (per kode barang, urut)
+        for no, d in out.items():
+            sisa_kode = dict(diterima.get(no, {}))
+            for it in d["items"]:
+                k = it["code"].upper()
+                dapat = min(it["pesan_stok"], sisa_kode.get(k, 0.0)) if k else 0.0
+                if k:
+                    sisa_kode[k] = sisa_kode.get(k, 0.0) - dapat
+                it["diterima_stok"] = dapat
+                it["sisa_stok"] = max(it["pesan_stok"] - dapat, 0.0)
+                it["sisa"] = round(it["sisa_stok"] / it["kali"], 3) if it["kali"] else it["sisa_stok"]
+            d["lengkap"] = all(it["code"] and it["sisa_stok"] <= 0.0001 for it in d["items"])
+            d["sebagian"] = any(it["diterima_stok"] > 0 for it in d["items"])
         return out
 
     def get_po_untuk_terima(self, hanya_belum=True, limit=40):
-        """PO + item (dicocokin ke PriceList) buat dicek staff gudang."""
+        """PO + item buat dicek staff gudang. PO hilang dari daftar kalau semua
+        barangnya udah datang lengkap, atau ditutup owner."""
         produk = [p for p in self.get_price_list() if str(p.get("Item_Code", "")).strip()]
-        terima = self.get_penerimaan_map()
-        by = {}
-        for r in self._po_terbuka_rows():
-            no = str(r["No_PO"]).strip()
-            d = by.setdefault(no, {"po": no, "supplier": str(r.get("Nama_Supplier", "")),
-                                   "tgl": str(r.get("Timestamp", ""))[:10], "items": []})
-            p = self._cocok_produk(r.get("Item", ""), produk)
-            try:
-                qty = float(r.get("Qty") or 0)
-            except (TypeError, ValueError):
-                qty = 0.0
-            sat = str(r.get("Satuan", "") or "")
-            try:
-                isi = float((p or {}).get("Isi_Bal") or 0)
-            except (TypeError, ValueError):
-                isi = 0.0
-            unit = "bal" if (p and isi > 0 and sat.strip().lower() == "bal") else "sat"
-            d["items"].append({"nama": str(r.get("Item", "")), "qty": qty, "satuan": sat,
-                               "kandidat": self._kandidat(r.get("Item", ""), produk, p),
-                               "code": str(p["Item_Code"]).strip() if p else "", "unit": unit,
-                               "satuan_stok": str((p or {}).get("Satuan", "") or sat)})
-        out = []
-        for d in sorted(by.values(), key=lambda d: d["po"], reverse=True):
-            t = terima.get(d["po"])
-            d["status_terima"] = str(t.get("Status", "")) if t else ""
-            if hanya_belum and d["status_terima"] == "Diterima":
+        res = []
+        for d in sorted(self._po_lines().values(), key=lambda d: d["po"], reverse=True):
+            if d["menunggu"]:
+                st = "Menunggu"
+            elif d["ditutup"]:
+                st = "Ditutup"
+            elif d["lengkap"]:
+                st = "Diterima"
+            elif d["sebagian"]:
+                st = "Sebagian"
+            else:
+                st = ""
+            if hanya_belum and st in ("Diterima", "Ditutup"):
                 continue
-            out.append(d)
-        return out[:limit]
+            d["status_terima"] = st
+            for it in d["items"]:
+                p = it.pop("_p")
+                it["kandidat"] = self._kandidat(it["nama"], produk, p)
+            res.append(d)
+            if len(res) >= limit:
+                break
+        return res
 
-    def add_penerimaan(self, no_po, batch, staff, catatan=""):
+    def add_penerimaan(self, no_po, batch, staff, catatan="", peta=None):
+        import json as _json
         self._ws(config.SHEET_PENERIMAAN).append_row(
-            [no_po, "Menunggu", batch, staff, _now_str(), catatan], value_input_option="RAW")
+            [no_po, "Menunggu", batch, staff, _now_str(), catatan,
+             _json.dumps(peta or {}, ensure_ascii=False)], value_input_option="RAW")
+
+    def tutup_po(self, no_po, oleh="owner"):
+        """Owner nutup PO yang sisanya gak bakal dikirim supplier."""
+        self._ws(config.SHEET_PENERIMAAN).append_row(
+            [no_po, "Ditutup", "", oleh, _now_str(), "Ditutup owner (sisa gak dikirim)", "{}"],
+            value_input_option="RAW")
 
     def set_penerimaan_status(self, batch, status):
         ws = self._ws(config.SHEET_PENERIMAAN)
@@ -1632,34 +1694,28 @@ class SheetsClient:
         return False
 
     def po_banding(self, no_po, diterima):
-        """Bandingin PO vs yang diterima. diterima: {item_code: qty_satuan_stok}.
-        Balikin list {nama, pesan, terima, satuan, selisih} (satuan stok)."""
-        produk = [p for p in self.get_price_list() if str(p.get("Item_Code", "")).strip()]
-        out, dipakai = [], set()
-        for r in self._po_terbuka_rows():
-            if str(r["No_PO"]).strip() != no_po:
-                continue
-            p = self._cocok_produk(r.get("Item", ""), produk)
-            try:
-                qty = float(r.get("Qty") or 0)
-            except (TypeError, ValueError):
-                qty = 0.0
-            sat = str(r.get("Satuan", "") or "")
-            code = str(p["Item_Code"]).strip().upper() if p else ""
-            try:
-                isi = float((p or {}).get("Isi_Bal") or 0)
-            except (TypeError, ValueError):
-                isi = 0.0
-            if p and isi > 0 and sat.strip().lower() == "bal":
-                qty, sat = qty * isi, str(p.get("Satuan", "") or sat)
-            got = float(diterima.get(code, 0)) if code else 0.0
-            if code:
-                dipakai.add(code)
-            out.append({"nama": str(r.get("Item", "")), "pesan": qty, "terima": got, "satuan": sat,
-                        "selisih": got - qty})
-        for code, got in diterima.items():
-            if code not in dipakai:
-                out.append({"nama": code, "pesan": 0, "terima": got, "satuan": "", "selisih": got})
+        """Bandingin PO vs yang datang SEKARANG (diterima: {item_code: qty satuan stok}).
+        Balikin list {nama, pesan, sebelumnya, terima, sisa, satuan, selisih}."""
+        d = self._po_lines().get(no_po)
+        out, sisa_kode = [], {k.upper(): v for k, v in diterima.items()}
+        for it in (d or {}).get("items", []):
+            k = it["code"].upper()
+            now = min(it["sisa_stok"], sisa_kode.get(k, 0.0)) if k else 0.0
+            if k:
+                sisa_kode[k] = sisa_kode.get(k, 0.0) - now
+            out.append({"nama": it["nama"], "pesan": it["pesan_stok"], "sebelumnya": it["diterima_stok"],
+                        "terima": now, "sisa": it["sisa_stok"] - now, "satuan": it["satuan_stok"],
+                        "selisih": now - it["sisa_stok"]})
+        for k, v in sisa_kode.items():
+            if v > 0.0001:
+                ada = next((o for o in reversed(out) if (d and any(i["code"].upper() == k and i["nama"] == o["nama"] for i in d["items"]))), None)
+                if ada:
+                    ada["terima"] += v
+                    ada["selisih"] += v
+                    ada["sisa"] -= v
+                else:
+                    out.append({"nama": k, "pesan": 0, "sebelumnya": 0, "terima": v, "sisa": -v, "satuan": "",
+                                "selisih": v})
         return out
 
     # permintaan barang (staff minta owner order)

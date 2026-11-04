@@ -200,8 +200,14 @@ def add_stok_routes(app, sheets_getter):
                 except Exception:
                     logger.exception("gagal banding PO")
         perm = await asyncio.to_thread(sheets.get_permintaan, None, "Baru", 50)
+        try:
+            po_belum = await asyncio.to_thread(sheets.get_po_untuk_terima, True, 40)
+        except Exception:
+            logger.exception("gagal ambil PO belum lengkap")
+            po_belum = []
         orders = await asyncio.to_thread(sheets.get_orders_gudang, 15)
         return web.json_response({"ok": True, "pengajuan": list(batches.values()), "permintaan": perm,
+                                  "po_belum": po_belum,
                                   "orders": orders})
 
     async def decide(request):
@@ -295,6 +301,16 @@ def add_stok_routes(app, sheets_getter):
         n = await asyncio.to_thread(sheets.set_pengiriman_banyak, invs, "Owner (dashboard)")
         return web.json_response({"ok": True, "n": n})
 
+    async def tutup_po(request):
+        if not await _link(request, ("@owner",)):
+            return web.json_response({"ok": False}, status=404)
+        no = str((await request.json()).get("po", "")).strip()[:40]
+        if not no:
+            return web.json_response({"ok": False}, status=400)
+        await asyncio.to_thread(sheets_getter().tutup_po, no, "Owner (dashboard)")
+        return web.json_response({"ok": True})
+
+    app.router.add_post("/dashboard/{token}/tutuppo", tutup_po)
     app.router.add_post("/dashboard/{token}/kirim", tandai_kirim)
     app.router.add_get("/dashboard/{token}/struk/{inv}", struk)
     app.router.add_get("/dashboard/{token}/dok/{inv}/{kind}", dokumen)

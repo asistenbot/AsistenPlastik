@@ -89,25 +89,25 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{tab=b.datase
 function view(){const m=$('m');const bar=$('bar');bar.classList.add('hide');
 if(tab=='po'){const P=D.po||[];
 if(!poSel){let h='<div class="info">PO ke supplier yang barangnya belum dicek. Pilih PO, cek jumlah barang yang datang, lalu kirim ke owner.</div>';
-P.forEach(p=>{const w=p.status_terima=='Menunggu';h+='<div class="card"><b>'+esc(p.po)+' — '+esc(p.supplier)+' <span class="badge '+(w?'Menunggu':'Baru')+'">'+(w?'Menunggu owner':'Belum dicek')+'</span></b><small>'+esc(p.tgl)+' • '+p.items.length+' macam barang</small><div style="margin:6px 0">'+p.items.map(i=>'• '+esc(i.nama)+' — <b>'+fmt(i.qty)+' '+esc(i.satuan)+'</b>').join('<br>')+'</div>'+(w?'<small>Sudah kamu kirim, tinggal disetujui owner.</small>':'<button class="btn sm" data-po="'+esc(p.po)+'">✅ Cek barang PO ini</button>')+'</div>'});
+P.forEach(p=>{const w=p.status_terima=='Menunggu',sb=p.status_terima=='Sebagian';h+='<div class="card"><b>'+esc(p.po)+' — '+esc(p.supplier)+' <span class="badge '+(w?'Menunggu':sb?'menipis':'Baru')+'">'+(w?'Menunggu owner':sb?'Sebagian datang':'Belum datang')+'</span></b><small>'+esc(p.tgl)+' • '+p.items.length+' macam barang</small><div style="margin:6px 0">'+p.items.map(i=>'• '+esc(i.nama)+' — <b>'+fmt(i.qty)+' '+esc(i.satuan)+'</b>'+(i.diterima_stok>0?' <small class="mu">(sudah datang '+fmt(i.qty-i.sisa)+', sisa <b>'+fmt(i.sisa)+'</b>)</small>':'')).join('<br>')+'</div>'+(w?'<small>Sudah kamu kirim, tinggal disetujui owner.</small>':'<button class="btn sm" data-po="'+esc(p.po)+'">📥 Input barang datang</button>')+'</div>'});
 m.innerHTML=h+(P.length?'':'<p>Gak ada PO yang perlu dicek 🎉</p>');
-m.querySelectorAll('[data-po]').forEach(b=>b.onclick=()=>{poSel=b.dataset.po;poV={};const p=P.find(x=>x.po==poSel);poOpen={};p.items.forEach((it,i)=>{poV[i]={q:String(it.qty),code:it.code}});view()});return}
+m.querySelectorAll('[data-po]').forEach(b=>b.onclick=()=>{poSel=b.dataset.po;poV={};const p=P.find(x=>x.po==poSel);poOpen={};p.items.forEach((it,i)=>{poV[i]={q:String(it.sisa),code:it.code}});view()});return}
 const p=P.find(x=>x.po==poSel);if(!p){poSel=null;view();return}
-let h='<button class="btn sm" id="bk" style="background:#555;margin-bottom:8px">← Kembali</button><div class="info"><b>'+esc(p.po)+' — '+esc(p.supplier)+'</b><br>Jumlah sudah keisi sesuai PO. <b>Ubah kalau yang datang beda</b> (kurang/lebih), isi 0 kalau gak datang.</div><button class="btn sm" id="sesuai" style="margin-bottom:6px">Semua sesuai PO</button><div id="lst"></div><input id="cat" placeholder="Catatan (misal: 2 bal sobek / kurang kirim)">';
+let h='<button class="btn sm" id="bk" style="background:#555;margin-bottom:8px">← Kembali</button><div class="info"><b>'+esc(p.po)+' — '+esc(p.supplier)+'</b><br>Isi jumlah yang <b>DATANG SEKARANG</b> aja. Angka awal = sisa yang belum datang. Kalau baru datang sebagian (misal 1000 dari 5000), <b>ganti angkanya</b>. Isi 0 kalau barang itu belum datang. Sisanya nanti bisa diinput lagi pas datang.</div><button class="btn sm" id="sesuai" style="margin-bottom:6px">Sisa datang semua</button><div id="lst"></div><input id="cat" placeholder="Catatan (misal: 2 bal sobek / kurang kirim)">';
 m.innerHTML=h;
 const draw=()=>{$('lst').innerHTML=p.items.map((it,i)=>{const v=poV[i];const opts=D.items.map(x=>'<option value="'+esc(x.code)+'"'+(v.code==x.code?' selected':'')+'>'+esc(x.nama)+'</option>').join('');
 const row=D.items.find(x=>x.code==v.code);const unmatched=!v.code;const unit=unitFor(it,v.code)=='bal'?'bal':(row?row.satuan:it.satuan_stok);
 const chips=(it.kandidat||[]).map(k=>'<button class="chip'+(v.code==k.code?' on':'')+'" data-i="'+i+'" data-k="'+esc(k.code)+'">'+esc(k.nama)+' <small>('+esc(k.satuan)+')</small></button>').join('');
 const cur=row?'<button class="chip on" data-i="'+i+'" data-k="'+esc(row.code)+'">'+esc(row.nama)+' <small>('+esc(row.satuan)+')</small></button>':'';
 const open=unmatched||poOpen[i];
-return '<div class="it"><b>'+esc(it.nama)+(unmatched?' <span class="badge Ditolak">pilih dulu</span>':' <span class="badge Disetujui">cocok</span>')+'</b><small class="mu">Dipesan: '+fmt(it.qty)+' '+esc(it.satuan)+'</small>'+
+return '<div class="it"><b>'+esc(it.nama)+(unmatched?' <span class="badge Ditolak">pilih dulu</span>':' <span class="badge Disetujui">cocok</span>')+'</b><small class="mu">Dipesan: '+fmt(it.qty)+' '+esc(it.satuan)+(it.diterima_stok>0?' • sudah datang '+fmt(it.qty-it.sisa)+' • <b>sisa '+fmt(it.sisa)+'</b>':'')+'</small>'+
 (open?'<div class="mu" style="margin:6px 0 2px">'+(unmatched?'Yang mana barangnya? Tap salah satu:':'Tap kalau ukurannya/jenisnya beda:')+'</div><div class="chips">'+cur+chips+'</div><select data-s="'+i+'"><option value="">— atau cari di semua barang —</option>'+opts+'</select>':'<button class="lnk" data-o="'+i+'">bukan ini? ganti ukuran/jenis</button>')+'<div class="row"><input inputmode="decimal" data-q="'+i+'" value="'+esc(v.q)+'"><div style="flex:1;align-self:center">'+esc(unit)+'</div></div></div>'}).join('');upd()};
 const unitFor=(it,code)=>{const x=D.items.find(y=>y.code==code);return(code&&x&&x.isi_bal>0&&String(it.satuan).toLowerCase()=='bal')?'bal':'sat'};
 const nBelum=()=>p.items.filter((it,i)=>!poV[i].code&&parseFloat(String(poV[i].q).replace(',','.'))!=0).length;
 const ok=()=>p.items.every((it,i)=>{const v=poV[i];return v.q!==''&&!isNaN(parseFloat(String(v.q).replace(',','.')))&&(parseFloat(String(v.q).replace(',','.'))==0||v.code)});
 const upd=()=>{const nb=nBelum();$('cnt').innerHTML=nb?'<b style="color:#b3261e">'+nb+' barang belum dipilih</b>':p.items.length+' macam barang';$('go').disabled=!ok()};
 bar.classList.remove('hide');$('go').textContent='Kirim ke owner';draw();
-$('bk').onclick=()=>{poSel=null;view()};$('sesuai').onclick=()=>{p.items.forEach((it,i)=>{poV[i].q=String(it.qty)});draw();const t=$('sesuai');t.textContent='✓ Jumlah sudah sesuai PO';setTimeout(()=>t.textContent='Semua sesuai PO',1500)};
+$('bk').onclick=()=>{poSel=null;view()};$('sesuai').onclick=()=>{p.items.forEach((it,i)=>{poV[i].q=String(it.sisa)});draw();const t=$('sesuai');t.textContent='✓ Diisi sesuai sisa';setTimeout(()=>t.textContent='Sisa datang semua',1500)};
 $('lst').addEventListener('click',e=>{const c=e.target.closest('button');if(!c)return;if(c.dataset.k!==undefined){poV[c.dataset.i].code=c.dataset.k;draw()}else if(c.dataset.o!==undefined){poOpen[c.dataset.o]=true;draw()}});
 $('lst').addEventListener('input',e=>{const i=e.target.dataset.q;if(i!==undefined){poV[i].q=e.target.value;upd()}});
 $('lst').addEventListener('change',e=>{const i=e.target.dataset.s;if(i!==undefined){poV[i].code=e.target.value;draw()}});
@@ -250,7 +250,9 @@ def add_staff_routes(app, sheets_getter, notify):
             return web.json_response({"ok": False, "error": "Semua jumlah 0 — gak ada barang yang diterima"}, status=400)
         catatan = str(body.get("catatan", ""))[:120]
         batch = await asyncio.to_thread(sheets.add_pengajuan, st["nama"], "Masuk", ents, no_po)
-        await asyncio.to_thread(sheets.add_penerimaan, no_po, batch, st["nama"], catatan)
+        peta = {str(e.get("nama", ""))[:120]: str(e.get("code", ""))[:40]
+                for e in (body.get("entries") or [])[:200] if e.get("nama") and e.get("code")}
+        await asyncio.to_thread(sheets.add_penerimaan, no_po, batch, st["nama"], catatan, peta)
         try:
             await notify("pengajuan", {"batch": batch, "staff": st["nama"], "jenis": "Masuk", "ents": ents,
                                        "ref": no_po + (f" — {catatan}" if catatan else "")})

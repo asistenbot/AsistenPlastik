@@ -1198,11 +1198,13 @@ class SheetsClient:
                 total += jumlah
             elif r.get("Jenis") in ("Pembayaran", "Batal PO"):
                 total -= jumlah
+            elif r.get("Jenis") == "Penyesuaian":
+                total += jumlah  # + = barang datang lebih, - = kurang
         return total
 
     def _add_utang_entry(self, nama_supplier, no_po, jenis, jumlah, catatan=""):
         saldo = self._get_saldo_utang(nama_supplier)
-        saldo_baru = saldo + jumlah if jenis == "Utang Baru" else saldo - jumlah
+        saldo_baru = saldo + jumlah if jenis in ("Utang Baru", "Penyesuaian") else saldo - jumlah
         self._ws(config.SHEET_UTANG_SUPPLIER).append_row(
             [_today_str(), nama_supplier, no_po, jenis, jumlah, saldo_baru, catatan],
             value_input_option="RAW",
@@ -1574,6 +1576,8 @@ class SheetsClient:
             ref0 = str(entries[0].get("ref", ""))
             if ref0.upper().startswith(config.PO_PREFIX):
                 self.set_penerimaan_status(batch, "Diterima" if approve else "Ditolak")
+                if approve:
+                    self.sesuaikan_utang_po(ref0.strip())
         except Exception:
             logger.exception("gagal update status penerimaan PO")
         return len(entries)
@@ -1677,7 +1681,7 @@ class SheetsClient:
             unit = "bal" if (p and isi > 0 and sat.strip().lower() == "bal") else "sat"
             kali = isi if unit == "bal" else 1.0
             d["items"].append({"nama": nama, "qty": qty, "satuan": sat, "code": code, "unit": unit,
-                               "kali": kali, "pesan_stok": qty * kali,
+                               "kali": kali, "pesan_stok": qty * kali, "harga": self._f(r.get("Harga_Satuan")),
                                "satuan_stok": str((p or {}).get("Satuan", "") or sat),
                                "_p": p})
         # bagi yang udah diterima ke baris-baris PO (per kode barang, urut)
@@ -1729,10 +1733,76 @@ class SheetsClient:
              _json.dumps(peta or {}, ensure_ascii=False)], value_input_option="RAW")
 
     def tutup_po(self, no_po, oleh="owner"):
-        """Owner nutup PO yang sisanya gak bakal dikirim supplier."""
+        """Owner nutup PO yang sisanya gak bakal dikirim supplier -> utang
+        disesuaikan ke barang yang beneran datang."""
         self._ws(config.SHEET_PENERIMAAN).append_row(
             [no_po, "Ditutup", "", oleh, _now_str(), "Ditutup owner (sisa gak dikirim)", "{}"],
             value_input_option="RAW")
+        try:
+            return self.sesuaikan_utang_po(no_po)
+        except Exception:
+            logger.exception("gagal sesuaikan utang %s", no_po)
+            return 0.0
+
+    def penyesuaian_po(self, no_po):
+        """Total penyesuaian utang (bertanda) yang udah dicatat buat PO ini."""
+        tot = 0.0
+        for r in self._records(self._ws(config.SHEET_UTANG_SUPPLIER)):
+            if str(r.get("No_PO", "")) == no_po and r.get("Jenis") == "Penyesuaian":
+                tot += self._f(r.get("Jumlah"))
+        return tot
+
+    def sesuaikan_utang_po(self, no_po):
+        """Utang supplier ngikutin barang yang BENERAN datang:
+        - selama PO masih kebuka: yang ditagih = max(pesan, datang) per barang
+          (sisanya dianggap masih bakal dateng)
+        - kalau PO udah lengkap / ditutup: yang ditagih = yang datang.
+        Selisih dari nilai PO dicatat sebagai 'Penyesuaian' di UtangSupplier.
+        Balikin selisih yang baru dicatat (0 kalau gak ada perubahan)."""
+        d = self._po_lines().get(no_po)
+        if not d:
+            return 0.0
+        final = d["lengkap"] or d["ditutup"]
+        nilai_po = tagih = 0.0
+        for it in d["items"]:
+            datang = it["diterima_stok"] / it["kali"] if it["kali"] else it["diterima_stok"]
+            # kelebihan kiriman: _po_lines nge-cap diterima di jumlah pesanan, jadi hitung ulang lebihnya
+            nilai_po += it["qty"] * it["harga"]
+            q = datang if final else max(it["qty"], datang)
+            tagih += q * it["harga"]
+        lebih = self._kelebihan_po(no_po, d)
+        tagih += lebih
+        delta = round(tagih - nilai_po - self.penyesuaian_po(no_po))
+        if abs(delta) < 1:
+            return 0.0
+        ket = (f"Barang datang {'lebih' if delta > 0 else 'kurang'} dari PO"
+               + (" (PO ditutup)" if d["ditutup"] else ""))
+        with self._lock:
+            self._add_utang_entry(d["supplier"], no_po, "Penyesuaian", delta, ket)
+        try:
+            baru = nilai_po + self.penyesuaian_po(no_po)
+            for r in self.get_active_reminders():
+                if r.get("Jenis") == "bayar_supplier" and str(r.get("Ref", "")) == no_po:
+                    self.update_reminder(r["ID"], Jumlah=round(baru))
+        except Exception:
+            logger.exception("gagal update pengingat bayar %s", no_po)
+        return float(delta)
+
+    def _kelebihan_po(self, no_po, d):
+        """Nilai barang yang datang MELEBIHI pesanan (per kode barang)."""
+        dapat = {}
+        for r in self._records(self._ws(config.SHEET_PENGAJUAN)):
+            if str(r.get("Status", "")) == "Disetujui" and str(r.get("Ref", "")).strip() == no_po:
+                k = str(r.get("Item_Code", "")).strip().upper()
+                dapat[k] = dapat.get(k, 0.0) + self._f(r.get("Qty"))
+        pesan, harga_stok = {}, {}
+        for it in d["items"]:
+            k = it["code"].upper()
+            if not k:
+                continue
+            pesan[k] = pesan.get(k, 0.0) + it["pesan_stok"]
+            harga_stok.setdefault(k, it["harga"] / it["kali"] if it["kali"] else it["harga"])
+        return sum(max(dapat.get(k, 0.0) - pesan[k], 0.0) * harga_stok[k] for k in pesan)
 
     def set_penerimaan_status(self, batch, status):
         ws = self._ws(config.SHEET_PENERIMAAN)
@@ -1978,7 +2048,7 @@ class SheetsClient:
             ts = str(r.get("Timestamp", ""))
             lama = c["items"].get(k)
             if lama is None or ts >= lama["tgl"]:
-                c["items"][k] = {"nama": item, "harga": self._f(r.get("Harga_Satuan")),
+                c["items"][k] = {"nama": item, "harga": self._f(r.get("Harga_Satuan")), "code": code,
                                  "satuan": str(r.get("Satuan", "")), "tgl": ts, "sumber": "terakhir beli",
                                  "inv": str(r.get("No_Invoice", ""))}
         for nm in [str(r.get("Nama", "")).strip() for r in self.get_customers()]:
@@ -1989,7 +2059,7 @@ class SheetsClient:
             if key in cust:
                 code = str(r.get("Item_Code", "")).strip().upper()
                 p = pl_by.get(code, {})
-                cust[key]["items"][code] = {"nama": self._label_produk(p) if p else code,
+                cust[key]["items"][code] = {"nama": self._label_produk(p) if p else code, "code": code,
                                             "harga": self._f(r.get("Harga_Jual")),
                                             "satuan": str(p.get("Satuan", "")), "tgl": "",
                                             "sumber": "harga khusus", "inv": ""}
@@ -1998,7 +2068,7 @@ class SheetsClient:
             for key in cust:
                 code = str(p["Item_Code"]).strip().upper()
                 if key in khusus and code not in cust[key]["items"]:
-                    cust[key]["items"][code] = {"nama": self._label_produk(p), "harga": self._f(p.get("Harga_Jual")),
+                    cust[key]["items"][code] = {"nama": self._label_produk(p), "harga": self._f(p.get("Harga_Jual")), "code": code,
                                                 "satuan": str(p.get("Satuan", "")), "tgl": "",
                                                 "sumber": "katalog khusus", "inv": ""}
         kom = self.get_komisi_setting()
@@ -2046,6 +2116,17 @@ class SheetsClient:
                                       "beli": self._f(p.get("Harga_Beli")),
                                       "supplier": str(p.get("Supplier", "") or "")})
         return out
+
+    def set_harga_customer(self, customer, code, harga):
+        """Pasang/ubah harga jual KHUSUS 1 customer buat 1 barang (tab HargaCustomer)."""
+        ws = self._ws(config.SHEET_HARGA_CUSTOMER)
+        code = str(code).strip().upper()
+        for i, row in enumerate(ws.get_all_values()[1:], start=2):
+            if len(row) > 1 and _norm(row[0]) == _norm(customer) and row[1].strip().upper() == code:
+                ws.batch_update([{"range": f"C{i}", "values": [[harga]]}])
+                return "ubah"
+        ws.append_row([customer, code, harga], value_input_option="RAW")
+        return "baru"
 
     def get_harga_customer(self, nama):
         """{ITEM_CODE: harga khusus} buat 1 customer (tab HargaCustomer)."""

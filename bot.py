@@ -129,7 +129,10 @@ def _order_preview_text(parsed):
         total += subtotal
         flag = "" if it.get("item_code") else " ⚠️ *(produk gak ketemu di katalog, cek lagi)*"
         lines.append(f"• {it.get('nama_item')} x{it.get('qty')} {it.get('satuan', '')} = {rupiah(subtotal)}{flag}")
-        if it.get("harga_katalog") is not None:
+        if it.get("_harga_khusus"):
+            lines.append(f"   ↳ harga khusus {parsed.get('nama_customer', '')} {rupiah(harga)}"
+                         + (f" (katalog {rupiah(it['harga_katalog'])})" if it.get("harga_katalog") is not None else ""))
+        elif it.get("harga_katalog") is not None:
             lines.append(
                 f"   ↳ harga {rupiah(harga)}/{it.get('satuan', '')} dari foto/chat "
                 f"(harga katalog {rupiah(it['harga_katalog'])})"
@@ -255,6 +258,7 @@ def _resolve_items_with_price(parsed_items, sheets):
                 "satuan": row.get("Satuan", it.get("satuan", "")),
                 "harga_satuan": harga_doc if harga_doc is not None else harga_kat,
                 "qty": it.get("qty", 0),
+                "_harga_dok": harga_doc is not None,
             }
             try:
                 if harga_doc is not None and float(harga_kat or 0) != harga_doc:
@@ -888,6 +892,11 @@ async def _route_text(update, context, text):
     pakai AI, biar gak perlu apal command. Kalau gagal nebak / gak yakin,
     default-nya tetep dianggap ORDER customer (paling aman)."""
     try:
+        if await _cek_atur_harga_komisi(update, context, text):
+            return
+    except Exception:
+        logger.exception("gagal baca harga/komisi, lanjut normal")
+    try:
         route = classify_intent(text)
     except Exception:
         logger.exception("gagal classify_intent, fallback ke order")
@@ -959,6 +968,10 @@ async def _process_order_text(update, context, text):
         return
     parsed["items"] = _resolve_items_with_price(parsed.get("items", []), sheets)
     _fill_customer_defaults(parsed, sheets)
+    _pakai_harga_khusus(parsed, sheets)
+    extra = context.user_data.pop("order_extra", None)
+    if extra:
+        parsed["_extra"] = extra
 
     # Safety net: kalau AI gak nemu barang order sama sekali, jangan tunjukin
     # preview order kosong (Rp0) dengan tombol Simpan -- bikin bingung dan
@@ -975,7 +988,137 @@ async def _process_order_text(update, context, text):
         InlineKeyboardButton("✅ Simpan", callback_data="order_confirm"),
         InlineKeyboardButton("❌ Batal", callback_data="order_cancel"),
     ]])
-    await _send_text(update, _order_preview_text(parsed), reply_markup=kb)
+    teks = _order_preview_text(parsed)
+    ex = parsed.get("_extra") or {}
+    if ex:
+        pribadi = bool(update.effective_chat and update.effective_chat.type == "private")
+        tambahan = []
+        if ex.get("beli"):
+            tambahan.append(f"Harga beli: {rupiah(ex['beli'])}/satuan (disimpen ke PriceList)")
+        if ex.get("komisi"):
+            pen, rate = ex["komisi"]
+            tambahan.append(f"🤫 Komisi {pen or '-'}: {rupiah(rate)}/satuan (gak dicetak di invoice)" if pribadi
+                            else "🤫 Komisi dicatat (detail cuma di chat pribadi)")
+        teks += "\n\n" + "\n".join(tambahan)
+    await _send_text(update, teks, reply_markup=kb)
+
+
+def _pakai_harga_khusus(parsed, sheets):
+    """Barang yang harganya gak disebut di chat -> pakai harga KHUSUS customer
+    (tab HargaCustomer) kalau ada, bukan harga katalog."""
+    try:
+        hk = sheets.get_harga_customer(parsed.get("nama_customer", ""))
+    except Exception:
+        return
+    if not hk:
+        return
+    for it in parsed.get("items", []):
+        code = str(it.get("item_code", "")).strip().upper()
+        if code in hk and not it.get("_harga_dok"):
+            if float(it.get("harga_satuan") or 0) != float(hk[code]):
+                it["harga_katalog"] = it.get("harga_satuan")
+            it["harga_satuan"] = hk[code]
+            it["_harga_khusus"] = True
+
+
+import re as _re_atur
+_SAT = r"(?:pcs|pc|pak|pack|kg|lembar|lbr|satuan|bal|roll|dus)"
+_ANGKA = r"(?:rp\.?\s*)?(?P<rp>\d[\d.,]*\s*(?:rb|k|ribu)?)"
+_RE_KOMISI = _re_atur.compile(r"komisi(?:nya)?\s*(?:ke|buat|untuk|utk)?\s*(?P<nama>[a-z][a-z.'\- ]{0,30}?)?\s*:?\s*" + _ANGKA
+                              + r"\s*(?:(?:/|per)\s*" + _SAT + r")?", _re_atur.I)
+_RE_BELI = _re_atur.compile(r"(?:harga\s+beli|hrg\s+beli|modal(?:nya)?)\s*:?\s*" + _ANGKA
+                            + r"\s*(?:(?:/|per)\s*" + _SAT + r")?", _re_atur.I)
+_RE_JUAL = _re_atur.compile(r"(?:harga\s+jual|hrg\s+jual|jual(?:nya)?|invoice(?:nya)?|harga)\s*:?\s*" + _ANGKA
+                            + r"\s*(?:/|per)\s*" + _SAT, _re_atur.I)
+_RE_QTY = _re_atur.compile(r"(?<![/\d.,])\b\d[\d.,]*\s*" + _SAT + r"\b", _re_atur.I)
+
+
+def _angka(s):
+    return _parse_angka_harga(_re_atur.sub(r"\s+", "", s or ""))
+
+
+def _potong(text, *ms):
+    for m in sorted([m for m in ms if m], key=lambda m: -m.start()):
+        text = text[:m.start()] + " " + text[m.end():]
+    return text
+
+
+async def _cek_atur_harga_komisi(update, context, text):
+    """Tangkep kalimat kayak 'baso yen jual 900/pcs, harga beli 595/pcs, komisi
+    Marvel 100/pcs'. Ada qty barang -> order biasa + komisi/harga beli ikut.
+    Gak ada qty -> atur harga & komisi customer. Balikin True kalau ditangani."""
+    km, bl = _RE_KOMISI.search(text), _RE_BELI.search(text)
+    if not km and not bl:
+        return False
+    kom = None
+    if km and _angka(km.group("rp")):
+        pen = (km.group("nama") or "").strip(" .-")
+        pen = _re_atur.sub(r"\b(rp|sebesar|senilai)\b", "", pen, flags=_re_atur.I).strip()
+        if not pen:
+            ke = _re_atur.match(r"\s*(?:ke|buat|untuk|utk)\s+([a-z][a-z.' \-]{0,30}?)\s*(?=[,;\n]|$)", text[km.end():], _re_atur.I)
+            if ke:
+                pen = ke.group(1).strip()
+                km = _re_atur.search(_re_atur.escape(text[km.start():km.end() + ke.end()]), text)
+        kom = (pen.title() if pen.islower() else pen, _angka(km.group("rp") if "rp" in km.groupdict() else _RE_KOMISI.search(km.group(0)).group("rp")))
+    beli = _angka(bl.group("rp")) if bl else None
+    if not kom and not beli:
+        return False
+    sisa = _potong(text, km if kom else None, bl if beli else None)
+    if _RE_QTY.search(sisa):
+        context.user_data["order_extra"] = {"komisi": kom, "beli": beli}
+        await _process_order_text(update, context, sisa)
+        return True
+    jl = _RE_JUAL.search(sisa)
+    jual = _angka(jl.group("rp")) if jl else None
+    cust = _potong(sisa, jl)
+    cust = _re_atur.sub(r"\b(harga|hrg|jual|beli|set|atur|buat|untuk|utk|customer|cust|ke|per|pcs|dan|sama)\b", " ", cust, flags=_re_atur.I)
+    cust = " ".join(_re_atur.sub(r"[^\w .'-]", " ", cust).split()).strip(" .-")
+    await _do_atur_customer(update, context, cust, jual, beli, kom)
+    return True
+
+
+async def _do_atur_customer(update, context, cust, jual, beli, kom):
+    import asyncio
+    if not cust:
+        await update.effective_message.reply_text(
+            "Buat customer siapa? Contoh: baso yen jual 900/pcs, harga beli 595/pcs, komisi Marvel 100/pcs")
+        return
+    sheets = _sheets()
+    res = (await asyncio.to_thread(sheets.cek_harga, cust))["customer"]
+    nama = res[0]["nama"] if res else cust.title()
+    items = [i for i in (res[0]["items"] if res else []) if i.get("code")]
+    pend = {"nama": nama, "jual": jual, "beli": beli, "komisi": kom, "code": None, "item": None}
+    context.user_data["pending_atur"] = pend
+    if (jual or beli) and len(items) > 1:
+        pend["pilihan"] = [(i["code"], i["nama"]) for i in items[:12]]
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton(n[:40], callback_data=f"ac_pick:{k}")] for k, n in pend["pilihan"]]
+                                  + [[InlineKeyboardButton("❌ Batal", callback_data="ac_no")]])
+        await update.effective_message.reply_text(f"Harga {nama} ini buat barang yang mana?", reply_markup=kb)
+        return
+    if (jual or beli) and len(items) == 1:
+        pend["code"], pend["item"] = items[0]["code"], items[0]["nama"]
+    await _preview_atur(update.effective_message.reply_text, pend, update.effective_chat)
+
+
+async def _preview_atur(kirim, pend, chat):
+    pribadi = bool(chat and chat.type == "private")
+    lines = [f"Atur {pend['nama']}:"]
+    if (pend["jual"] or pend["beli"]) and not pend["code"]:
+        lines.append(f"⚠️ {pend['nama']} belum punya barang di katalog, jadi harga jual/beli belum bisa ditempel. "
+                     "Sebut harganya pas bikin invoice aja (mis. '7500 pcs kantong 15x30 900/pcs').")
+    else:
+        if pend["jual"]:
+            lines.append(f"• Harga jual {pend['item']}: {rupiah(pend['jual'])} (harga khusus {pend['nama']})")
+        if pend["beli"]:
+            lines.append(f"• Harga beli {pend['item']}: {rupiah(pend['beli'])} (PriceList)")
+    if pend["komisi"]:
+        pen, rate = pend["komisi"]
+        lines.append(f"• 🤫 Komisi {pen or '-'}: {rupiah(rate)}/satuan, semua barang" if pribadi
+                     else "• 🤫 Komisi (detail cuma di chat pribadi)")
+    bisa = pend["komisi"] or (pend["code"] and (pend["jual"] or pend["beli"]))
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Simpan", callback_data="ac_ok"),
+                                InlineKeyboardButton("❌ Batal", callback_data="ac_no")]]) if bisa else None
+    await kirim("\n".join(lines), reply_markup=kb)
 
 
 _EDIT_FIELD_LABEL = {
@@ -1585,6 +1728,40 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _kabar_komisi(context.bot, inv)
         return
 
+    if data == "ac_no":
+        context.user_data.pop("pending_atur", None)
+        await query.edit_message_text("Oke, gak jadi.")
+        return
+    if data.startswith("ac_pick:"):
+        pend = context.user_data.get("pending_atur")
+        if not pend:
+            await query.edit_message_text("Udah kadaluarsa, ketik ulang ya.")
+            return
+        code = data.split(":", 1)[1]
+        pend["code"] = code
+        pend["item"] = dict(pend.get("pilihan", [])).get(code, code)
+        await _preview_atur(query.edit_message_text, pend, update.effective_chat)
+        return
+    if data == "ac_ok":
+        pend = context.user_data.pop("pending_atur", None)
+        if not pend:
+            await query.edit_message_text("Udah kadaluarsa, ketik ulang ya.")
+            return
+        sheets, done = _sheets(), []
+        if pend["code"] and pend["jual"]:
+            sheets.set_harga_customer(pend["nama"], pend["code"], pend["jual"])
+            done.append(f"harga jual {pend['item']} {rupiah(pend['jual'])} (khusus {pend['nama']})")
+        if pend["code"] and pend["beli"]:
+            sheets.bulk_update_price([pend["code"]], "beli", pend["beli"])
+            done.append(f"harga beli {pend['item']} {rupiah(pend['beli'])}")
+        if pend["komisi"]:
+            pen, rate = pend["komisi"]
+            sheets.set_komisi(pend["nama"], rate, pen)
+            done.append("komisi" + (f" {pen} {rupiah(rate)}/satuan" if update.effective_chat and update.effective_chat.type == "private" else ""))
+        await query.edit_message_text(f"✅ {pend['nama']}: " + ", ".join(done) + " — disimpan."
+                                      + ("\nOrder chat berikutnya otomatis pakai harga khusus ini." if pend["code"] and pend["jual"] else ""))
+        return
+
     if data.startswith("km_ok:"):
         inv = data.split(":", 1)[1]
         r = _sheets().bayar_komisi(inv)
@@ -1647,6 +1824,26 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         context.user_data["last_invoice"] = no_invoice
         await query.edit_message_text(f"✅ Order disimpan sebagai *{no_invoice}*. Lagi bikin invoice & surat jalan...", parse_mode=ParseMode.MARKDOWN)
+        ex = parsed.get("_extra") or {}
+        if ex:
+            info = []
+            try:
+                if ex.get("komisi"):
+                    pen, rate = ex["komisi"]
+                    sheets.set_komisi(parsed.get("nama_customer", "-"), rate, pen)
+                    info.append("🤫 Komisi customer ini disimpan" + (f" ({pen} {rupiah(rate)}/satuan)."
+                                if query.message and query.message.chat.type == "private" else "."))
+                if ex.get("beli"):
+                    codes = {str(i.get("item_code", "")).upper() for i in parsed["items"] if i.get("item_code")}
+                    if len(codes) == 1:
+                        sheets.bulk_update_price(list(codes), "beli", ex["beli"])
+                        info.append(f"Harga beli {next(iter(codes))} jadi {rupiah(ex['beli'])} di PriceList.")
+                    else:
+                        info.append("Harga beli gak disimpen (barangnya lebih dari 1 / gak ada di katalog) — set lewat /harga.")
+            except Exception:
+                logger.exception("gagal simpen komisi/harga beli dari order")
+            if info:
+                await update.effective_chat.send_message("\n".join(info))
         try:
             rows = sheets.get_order_items(no_invoice)
             tot = sum(float(r.get("Subtotal", 0) or 0) for r in rows) + float(rows[0].get("Ongkir", 0) or 0)
@@ -2288,7 +2485,7 @@ async def _handle_reminder_callback(update, context, data):
             sheets.close_reminders_for_ref(ref, "Selesai" if status == "Lunas" else "Batal")
             await query.edit_message_text(f"{ref} udah {status or 'gak ketemu'}, pengingatnya ditutup.")
             return
-        total = sum(float(r.get("Subtotal", 0) or 0) for r in rows)
+        total = sum(float(r.get("Subtotal", 0) or 0) for r in rows) + sheets.penyesuaian_po(ref)
         sisa = sheets.bayar_utang(nama, total, f"Pelunasan {ref}")
         sheets.add_kas_entry("Keluar", "Bayar Supplier", total, keterangan=f"Bayar utang {nama} {ref}", ref=ref)
         sheets.mark_po_lunas(ref)

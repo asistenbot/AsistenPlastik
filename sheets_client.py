@@ -1825,6 +1825,114 @@ class SheetsClient:
             out.append(d)
         return out
 
+    # ---------------- CEK HARGA (customer / supplier / barang) ----------------
+
+    def cek_harga(self, query):
+        """Cari harga berdasarkan nama CUSTOMER (harga terakhir dia beli + harga
+        khusus), nama SUPPLIER (harga beli terakhir di PO + Harga_Beli PriceList),
+        atau nama BARANG (harga jual & beli PriceList).
+        Balikin {"customer": [...], "supplier": [...], "produk": [...]}."""
+        q = _norm(query)
+        out = {"customer": [], "supplier": [], "produk": []}
+        if not q:
+            return out
+        pl = [p for p in self.get_price_list() if str(p.get("Item_Code", "")).strip()]
+        pl_by = {str(p["Item_Code"]).strip().upper(): p for p in pl}
+
+        import difflib
+
+        def cocok(nama):
+            n = _norm(nama)
+            if not n:
+                return False
+            if q in n or (n in q and len(n) >= 4):
+                return True
+            # toleran salah ketik dikit (hippie ~ hippe, basoyen ~ baso yen)
+            if len(q) >= 4 and difflib.SequenceMatcher(None, q, n).ratio() >= 0.8:
+                return True
+            return len(q) >= 4 and difflib.SequenceMatcher(None, q, n[:len(q) + 1]).ratio() >= 0.85
+
+        # --- customer ---
+        cust = {}
+        for r in self.get_all_orders():
+            nm = str(r.get("Nama_Customer", "")).strip()
+            if not cocok(nm) or str(r.get("Status", "")) == "Batal":
+                continue
+            key = _norm(nm)
+            c = cust.setdefault(key, {"nama": nm, "items": {}})
+            code = str(r.get("Item_Code", "")).strip().upper()
+            item = str(r.get("Nama_Item", "")).strip()
+            k = code or _norm(item)
+            ts = str(r.get("Timestamp", ""))
+            lama = c["items"].get(k)
+            if lama is None or ts >= lama["tgl"]:
+                c["items"][k] = {"nama": item, "harga": self._f(r.get("Harga_Satuan")),
+                                 "satuan": str(r.get("Satuan", "")), "tgl": ts, "sumber": "terakhir beli",
+                                 "inv": str(r.get("No_Invoice", ""))}
+        for nm in [str(r.get("Nama", "")).strip() for r in self.get_customers()]:
+            if cocok(nm):
+                cust.setdefault(_norm(nm), {"nama": nm, "items": {}})
+        for r in self._records(self._ws(config.SHEET_HARGA_CUSTOMER)):
+            key = _norm(r.get("Customer", ""))
+            if key in cust:
+                code = str(r.get("Item_Code", "")).strip().upper()
+                p = pl_by.get(code, {})
+                cust[key]["items"][code] = {"nama": self._label_produk(p) if p else code,
+                                            "harga": self._f(r.get("Harga_Jual")),
+                                            "satuan": str(p.get("Satuan", "")), "tgl": "",
+                                            "sumber": "harga khusus", "inv": ""}
+        for p in pl:
+            khusus = [_norm(x) for x in str(p.get("Khusus_Customer", "")).split(",") if x.strip()]
+            for key in cust:
+                code = str(p["Item_Code"]).strip().upper()
+                if key in khusus and code not in cust[key]["items"]:
+                    cust[key]["items"][code] = {"nama": self._label_produk(p), "harga": self._f(p.get("Harga_Jual")),
+                                                "satuan": str(p.get("Satuan", "")), "tgl": "",
+                                                "sumber": "katalog khusus", "inv": ""}
+        for c in cust.values():
+            c["items"] = sorted(c["items"].values(), key=lambda i: i["nama"].lower())
+            out["customer"].append(c)
+
+        # --- supplier ---
+        sup = {}
+        for r in self.get_all_pos():
+            nm = str(r.get("Nama_Supplier", "")).strip()
+            if not cocok(nm) or str(r.get("Status", "")) == "Batal":
+                continue
+            s_ = sup.setdefault(_norm(nm), {"nama": nm, "items": {}})
+            item = str(r.get("Item", "")).strip()
+            ts = str(r.get("Timestamp", ""))
+            lama = s_["items"].get(_norm(item))
+            if lama is None or ts >= lama["tgl"]:
+                s_["items"][_norm(item)] = {"nama": item, "harga": self._f(r.get("Harga_Satuan")),
+                                            "satuan": str(r.get("Satuan", "")), "tgl": ts,
+                                            "sumber": "PO terakhir", "inv": str(r.get("No_PO", ""))}
+        for nm in self.get_supplier_names():
+            if cocok(nm):
+                sup.setdefault(_norm(nm), {"nama": nm, "items": {}})
+        for p in pl:
+            key = _norm(p.get("Supplier", ""))
+            if key and (key in sup or cocok(p.get("Supplier", ""))):
+                s_ = sup.setdefault(key, {"nama": str(p.get("Supplier", "")).strip(), "items": {}})
+                lab = self._label_produk(p)
+                if _norm(lab) not in s_["items"] and self._f(p.get("Harga_Beli")) > 0:
+                    s_["items"][_norm(lab)] = {"nama": lab, "harga": self._f(p.get("Harga_Beli")),
+                                               "satuan": str(p.get("Satuan", "")), "tgl": "",
+                                               "sumber": "PriceList", "inv": ""}
+        for s_ in sup.values():
+            s_["items"] = sorted(s_["items"].values(), key=lambda i: i["nama"].lower())
+            out["supplier"].append(s_)
+
+        # --- barang (kalau bukan nama customer/supplier) ---
+        if not out["customer"] and not out["supplier"]:
+            _, rows = self.cari_produk_massal(query)
+            for p in rows[:40]:
+                out["produk"].append({"code": str(p.get("Item_Code", "")), "nama": self._label_produk(p),
+                                      "satuan": str(p.get("Satuan", "")), "jual": self._f(p.get("Harga_Jual")),
+                                      "beli": self._f(p.get("Harga_Beli")),
+                                      "supplier": str(p.get("Supplier", "") or "")})
+        return out
+
     def get_harga_customer(self, nama):
         """{ITEM_CODE: harga khusus} buat 1 customer (tab HargaCustomer)."""
         out = {}

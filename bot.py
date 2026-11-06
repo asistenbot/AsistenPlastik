@@ -323,6 +323,7 @@ Command di bawah ini cadangan aja kalau mau lebih pasti/cepat:
 /dokumen <no invoice atau nama customer> — cetak ulang invoice + surat jalan
 (kalau customer punya banyak invoice, bot kasih daftar buat dipilih)
 /lunas <no invoice atau nama customer> — tandai order sudah dibayar
+/cekharga <customer/supplier/barang> — LIHAT harga (mis. /cekharga baso yen, /cekharga hippe)
 /harga <kategori/nama> <harga> [beli] — ubah harga banyak produk sekaligus (ada preview)
 /stok [nama] — cek stok menipis / stok barang tertentu\n/staffbaru <nama> — bikin akun staff gudang (ID+password)\n/staff — daftar staff, /staffreset <id>, /staffoff <id>\n/linkdashboard — link dashboard stok (lu aja)\n/pengingat — lihat jadwal pengingat (kontra bon, tagihan, bayar supplier)
 /piutang — rekap tagihan customer yang belum lunas
@@ -898,7 +899,9 @@ async def _route_text(update, context, text):
     bulan = (route.get("bulan") or "").strip()
     jumlah = route.get("jumlah") or 0
 
-    if intent == "report_pricelist":
+    if intent == "cek_harga" or (intent == "report_pricelist" and target):
+        await _do_cek_harga(update, target or text)
+    elif intent == "report_pricelist":
         await _do_pricelist(update)
     elif intent == "report_piutang":
         await _do_piutang(update)
@@ -2340,6 +2343,66 @@ def _parse_angka_harga(tok):
 
 
 @owner_only
+async def cekharga_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = " ".join(context.args or []).strip()
+    if not q:
+        await update.effective_message.reply_text(
+            "Format: /cekharga <nama customer / supplier / barang>\n"
+            "Contoh:\n/cekharga baso yen\n/cekharga hippe\n/cekharga tulip")
+        return
+    await _do_cek_harga(update, q)
+
+
+def _tgl_pendek(ts):
+    s = str(ts or "")[:10]
+    return f"{s[8:10]}-{s[5:7]}-{s[2:4]}" if len(s) == 10 else ""
+
+
+async def _do_cek_harga(update, q):
+    import asyncio
+    try:
+        hasil = await asyncio.to_thread(_sheets().cek_harga, q)
+    except Exception:
+        logger.exception("gagal cek harga")
+        await update.effective_message.reply_text("Gagal ambil data harga, coba lagi sebentar.")
+        return
+    pesan = []
+    for c in hasil["customer"]:
+        lines = [f"💰 HARGA JUAL ke {c['nama'].upper()}", ""]
+        for i in c["items"][:60]:
+            ket = f"terakhir {_tgl_pendek(i['tgl'])}" if i["tgl"] else i["sumber"]
+            lines.append(f"• {i['nama']} — {rupiah(i['harga'])}/{i['satuan'] or '-'}  ({ket})")
+        if not c["items"]:
+            lines.append("(belum pernah order & gak ada harga khusus)")
+        elif len(c["items"]) > 60:
+            lines.append(f"... dan {len(c['items']) - 60} barang lagi")
+        pesan.append("\n".join(lines))
+    for s_ in hasil["supplier"]:
+        lines = [f"🏭 HARGA BELI dari {s_['nama'].upper()}", ""]
+        for i in s_["items"][:60]:
+            ket = f"PO {_tgl_pendek(i['tgl'])}" if i["tgl"] else i["sumber"]
+            lines.append(f"• {i['nama']} — {rupiah(i['harga'])}/{i['satuan'] or '-'}  ({ket})")
+        if not s_["items"]:
+            lines.append("(belum ada PO / harga beli dari supplier ini)")
+        elif len(s_["items"]) > 60:
+            lines.append(f"... dan {len(s_['items']) - 60} barang lagi")
+        pesan.append("\n".join(lines))
+    if hasil["produk"]:
+        lines = [f"🔎 HARGA '{q}'", ""]
+        for p in hasil["produk"]:
+            lines.append(f"• {p['nama']} ({p['code']}) — jual {rupiah(p['jual'])}, beli {rupiah(p['beli'])}/{p['satuan'] or '-'}"
+                         + (f"  [{p['supplier']}]" if p["supplier"] else ""))
+        pesan.append("\n".join(lines))
+    if not pesan:
+        await update.effective_message.reply_text(
+            f"Gak nemu customer, supplier, atau barang yang namanya '{q}'. Coba ketik sebagian nama aja.")
+        return
+    for t in pesan:
+        for i in range(0, len(t), 3800):
+            await update.effective_message.reply_text(t[i:i + 3800])
+
+
+@owner_only
 async def hargakategori_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = list(context.args or [])
     usage = ("Format: /harga <kategori atau nama> <harga> [beli]\n"
@@ -2634,6 +2697,7 @@ def main():
     app.add_handler(CommandHandler("stok", stok_cmd))
     app.add_handler(CommandHandler("harga", hargakategori_cmd))
     app.add_handler(CommandHandler("hargakategori", hargakategori_cmd))
+    app.add_handler(CommandHandler("cekharga", cekharga_cmd))
     app.add_handler(CommandHandler("importgrandia", importgrandia_cmd))
     app.add_error_handler(error_handler)
     app.add_handler(CommandHandler("lunas", lunas_cmd))

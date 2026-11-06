@@ -360,7 +360,12 @@ Daftar intent yang valid:
 - "report_piutang" -- nanya piutang / tagihan customer yang belum dibayar
 - "report_utang" -- nanya utang ke supplier yang belum dibayar
 - "report_kas_bulanan" -- nanya laporan kas / laba rugi / untung rugi bulanan
-- "report_pricelist" -- nanya daftar harga produk
+- "report_pricelist" -- nanya daftar harga SEMUA produk (gak nyebut nama tertentu)
+- "cek_harga" -- NANYA harga (bukan ngubah) buat customer tertentu, supplier
+  tertentu, atau barang tertentu. Contoh: "harga baso yen berapa aja", "minta
+  harga hippe", "harga tulip berapa", "cek harga grandia". target = nama
+  customer/supplier/barang yang disebut. Kalau ada angka harga baru yang mau
+  dipasang, itu "update_harga", bukan cek_harga.
 - "mark_lunas" -- bilang customer tertentu udah BAYAR / LUNAS (uangnya udah masuk), BUKAN kontra bon
 - "kontra_bon" -- ngomongin KONTRA BON customer (mis. "baso yen sudah kontra bon",
   "kontrabon pillow cake", "grandia udah di kontra bon"). KONTRA BON BUKAN LUNAS:

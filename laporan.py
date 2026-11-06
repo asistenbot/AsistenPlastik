@@ -207,10 +207,31 @@ def hitung_laporan(sheets, bulan=None):
     except Exception:
         pass
 
+    # ---- komisi jalur belakang ----
+    komisi_belum, komisi_set, komisi_bln = [], [], 0.0
+    try:
+        kset = sheets.get_komisi_setting()
+        komisi_set = sorted(kset.values(), key=lambda v: v["customer"].lower())
+        for r in sheets.get_komisi_belum():
+            komisi_belum.append({"invoice": str(r.get("No_Invoice", "")), "customer": str(r.get("Customer", "")),
+                                 "penerima": str(r.get("Penerima", "")), "qty": _f(r.get("Qty")),
+                                 "rate": _f(r.get("Rp_per_Satuan")), "jumlah": _f(r.get("Jumlah"))})
+        import re as _re
+        def _n(s):
+            return _re.sub(r"[^a-z0-9]", "", str(s).lower())
+        for o in bln:
+            k = kset.get(_n(o["customer"]))
+            if k:
+                komisi_bln += sum(it["qty"] for it in o["items"]) * k["rate"]
+    except Exception:
+        pass
+
     total_piutang = sum(t["total"] for t in tagihan)
     ringkas = {
         "omzet": omzet, "jml_invoice": len(bln), "lunas": lunas_bln, "belum_lunas": omzet - lunas_bln,
-        "laba_kotor": omzet - hpp_bln if bln else 0, "laba_lengkap": hpp_ok,
+        "laba_kotor": omzet - hpp_bln - komisi_bln if bln else 0, "laba_lengkap": hpp_ok,
+        "komisi_bulan": komisi_bln, "komisi_belum": len(komisi_belum),
+        "komisi_belum_total": sum(k["jumlah"] for k in komisi_belum),
         "rata_invoice": omzet / len(bln) if bln else 0,
         "total_piutang": total_piutang, "jml_tagihan": len(tagihan),
         "belum_kontra_bon": sum(1 for t in tagihan if t["kontra_bon"] == "belum"),
@@ -237,6 +258,6 @@ def hitung_laporan(sheets, bulan=None):
         "utang_supplier": [{"nama": k, "total": v} for k, v in _top(utang, 20)],
         "kas_masuk_kat": [{"nama": k, "total": v} for k, v in _top(lap["masuk_by_kategori"])],
         "kas_keluar_kat": [{"nama": k, "total": v} for k, v in _top(lap["keluar_by_kategori"])],
-        "kas_list": kas_list, "web_list": web_menunggu, "belum_kirim_list": belum_kirim[:40],
+        "kas_list": kas_list, "komisi_belum_list": komisi_belum, "komisi_setting": komisi_set, "web_list": web_menunggu, "belum_kirim_list": belum_kirim[:40],
         "belum_kirim_all": [d["invoice"] for d in belum_kirim], "stok_bermasalah": len(pernah),
     }

@@ -266,7 +266,19 @@ def add_stok_routes(app, sheets_getter, notify=None):
             return web.json_response({"ok": False, "error": f"{inv} sudah {status or 'tidak ketemu'}"})
         total = await asyncio.to_thread(sheets.mark_order_lunas, inv)
         await asyncio.to_thread(sheets.add_kas_entry, "Masuk", "Penjualan", total, keterangan=f"Pelunasan {inv}", ref=inv)
+        if notify is not None:
+            try:
+                await notify("komisi", {"invoice": inv})
+            except Exception:
+                logger.exception("gagal kabar komisi")
         return web.json_response({"ok": True, "total": total})
+
+    async def bayar_komisi(request):
+        if not await _link(request, ("@owner",)):
+            return web.json_response({"ok": False}, status=404)
+        inv = str((await request.json()).get("invoice", "")).strip()[:40]
+        r = await asyncio.to_thread(sheets_getter().bayar_komisi, inv)
+        return web.json_response({"ok": bool(r), "error": "" if r else "Udah dibayar / gak ada"})
 
     async def dokumen(request):
         if not await _link(request, ("@owner",)):
@@ -315,6 +327,7 @@ def add_stok_routes(app, sheets_getter, notify=None):
         return web.json_response({"ok": True})
 
     app.router.add_post("/dashboard/{token}/tutuppo", tutup_po)
+    app.router.add_post("/dashboard/{token}/bayarkomisi", bayar_komisi)
     app.router.add_post("/dashboard/{token}/kirim", tandai_kirim)
     app.router.add_get("/dashboard/{token}/struk/{inv}", struk)
     app.router.add_get("/dashboard/{token}/dok/{inv}/{kind}", dokumen)

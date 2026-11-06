@@ -65,6 +65,9 @@ SCHEMA = {
     config.SHEET_STAFF: ["ID", "Nama", "Hash", "Salt", "Aktif", "Dibuat"],
     config.SHEET_PENGAJUAN: ["ID", "Batch", "Waktu", "Staff", "Jenis", "Item_Code", "Nama", "Qty", "Satuan",
                              "Ref", "Status", "Diputuskan_Oleh", "Diputuskan_Waktu", "Pesan_TG"],
+    config.SHEET_KOMISI: ["Customer", "Rp_per_Satuan", "Penerima", "Catatan"],
+    config.SHEET_KOMISI_CATAT: ["No_Invoice", "Customer", "Penerima", "Qty", "Rp_per_Satuan", "Jumlah",
+                                "Status", "Dibuat", "Dibayar"],
     config.SHEET_PENERIMAAN: ["No_PO", "Status", "Batch", "Staff", "Waktu", "Catatan", "Peta"],
     config.SHEET_PERMINTAAN: ["ID", "Waktu", "Staff", "Item_Code", "Nama", "Qty", "Satuan", "Catatan", "Status"],
     config.SHEET_PENGIRIMAN: ["No_Invoice", "Status", "Staff", "Waktu"],
@@ -810,6 +813,10 @@ class SheetsClient:
         for r, c, v in updates:
             ws.update_cell(r, c, v)
         self._safe_close_reminders(no_invoice, "Selesai")
+        try:
+            self.catat_komisi(no_invoice)
+        except Exception:
+            logger.exception("gagal catat komisi %s", no_invoice)
         return total
 
     def unmark_order_lunas(self, no_invoice):
@@ -856,6 +863,10 @@ class SheetsClient:
                               _today_date() + datetime.timedelta(days=tempo), "Dibalikin dari Lunas")
         except Exception:
             logger.exception("gagal pasang pengingat ulang %s", no_invoice)
+        try:
+            self.batal_komisi(no_invoice)
+        except Exception:
+            logger.exception("gagal batalin komisi %s", no_invoice)
         return total
 
     def edit_order_header(self, no_invoice, updates):
@@ -1825,6 +1836,107 @@ class SheetsClient:
             out.append(d)
         return out
 
+    # ---------------- KOMISI "JALUR BELAKANG" (RAHASIA, cuma owner) ----------------
+
+    def get_komisi_setting(self):
+        """{norm(customer): {customer, rate, penerima, catatan}}"""
+        out = {}
+        for r in self._records(self._ws(config.SHEET_KOMISI)):
+            nm = str(r.get("Customer", "")).strip()
+            rate = self._f(r.get("Rp_per_Satuan"))
+            if nm and rate > 0:
+                out[_norm(nm)] = {"customer": nm, "rate": rate, "penerima": str(r.get("Penerima", "")).strip(),
+                                  "catatan": str(r.get("Catatan", "")).strip()}
+        return out
+
+    def komisi_untuk(self, customer):
+        return self.get_komisi_setting().get(_norm(customer))
+
+    def set_komisi(self, customer, rate, penerima="", catatan=""):
+        """Pasang/ubah komisi customer. rate <= 0 -> hapus. Balikin 'baru'/'ubah'/'hapus'/None."""
+        from gspread.utils import rowcol_to_a1
+        ws = self._ws(config.SHEET_KOMISI)
+        values = ws.get_all_values()
+        key = _norm(customer)
+        for i, row in enumerate(values[1:], start=2):
+            if row and _norm(row[0]) == key:
+                if rate <= 0:
+                    ws.delete_rows(i)
+                    return "hapus"
+                ws.batch_update([{"range": f"A{i}:D{i}", "values": [[customer, rate, penerima or (row[2] if len(row) > 2 else ""),
+                                                                     catatan or (row[3] if len(row) > 3 else "")]]}])
+                return "ubah"
+        if rate <= 0:
+            return None
+        ws.append_row([customer, rate, penerima, catatan], value_input_option="RAW")
+        return "baru"
+
+    def _komisi_rows(self):
+        return self._records(self._ws(config.SHEET_KOMISI_CATAT))
+
+    def get_komisi_catat(self, no_invoice):
+        for r in self._komisi_rows():
+            if str(r.get("No_Invoice", "")) == no_invoice and str(r.get("Status", "")) != "Batal":
+                return r
+        return None
+
+    def catat_komisi(self, no_invoice):
+        """Dipanggil pas invoice LUNAS: kalau customer-nya punya komisi, catat
+        tagihan komisinya (status Belum). Gak dobel. Balikin baris atau None."""
+        ada = self.get_komisi_catat(no_invoice)
+        if ada:
+            return ada
+        rows = self.get_order_items(no_invoice)
+        if not rows:
+            return None
+        nama = str(rows[0].get("Nama_Customer", "")).strip()
+        st = self.komisi_untuk(nama)
+        if not st:
+            return None
+        qty = sum(self._f(r.get("Qty")) for r in rows if str(r.get("Status", "")) != "Batal")
+        jumlah = round(qty * st["rate"])
+        if jumlah <= 0:
+            return None
+        row = [no_invoice, nama, st["penerima"], qty, st["rate"], jumlah, "Belum", _now_str(), ""]
+        self._ws(config.SHEET_KOMISI_CATAT).append_row(row, value_input_option="RAW")
+        return dict(zip(SCHEMA[config.SHEET_KOMISI_CATAT], row))
+
+    def get_komisi_belum(self):
+        return [r for r in self._komisi_rows() if str(r.get("Status", "")) == "Belum"]
+
+    def _set_komisi_status(self, no_invoice, dari, ke, tgl=""):
+        ws = self._ws(config.SHEET_KOMISI_CATAT)
+        values = ws.get_all_values()
+        h = values[0] if values else []
+        if "Status" not in h:
+            return None
+        cs, cd = h.index("Status"), h.index("Dibayar")
+        from gspread.utils import rowcol_to_a1
+        for i, row in enumerate(values[1:], start=2):
+            if row and row[0] == no_invoice and len(row) > cs and row[cs] == dari:
+                ws.batch_update([{"range": rowcol_to_a1(i, cs + 1), "values": [[ke]]},
+                                 {"range": rowcol_to_a1(i, cd + 1), "values": [[tgl]]}])
+                return dict(zip(h, row))
+        return None
+
+    _komisi_lock = threading.Lock()
+
+    def bayar_komisi(self, no_invoice):
+        """Tandai komisi invoice ini SUDAH DIBAYAR + catat Kas Keluar 'Komisi'.
+        Balikin baris komisinya, atau None kalau gak ada / udah dibayar."""
+        with self._komisi_lock:
+            r = self._set_komisi_status(no_invoice, "Belum", "Dibayar", _today_str())
+            if not r:
+                return None
+            jumlah = self._f(r.get("Jumlah"))
+            ket = f"Komisi {r.get('Penerima') or '-'} ({r.get('Customer')}) {no_invoice}"
+            self.add_kas_entry("Keluar", "Komisi", jumlah, keterangan=ket, ref=no_invoice)
+            return r
+
+    def batal_komisi(self, no_invoice):
+        """Invoice dibalikin ke Pending -> komisi yang belum dibayar dibatalin."""
+        return self._set_komisi_status(no_invoice, "Belum", "Batal")
+
     # ---------------- CEK HARGA (customer / supplier / barang) ----------------
 
     def cek_harga(self, query):
@@ -1889,8 +2001,10 @@ class SheetsClient:
                     cust[key]["items"][code] = {"nama": self._label_produk(p), "harga": self._f(p.get("Harga_Jual")),
                                                 "satuan": str(p.get("Satuan", "")), "tgl": "",
                                                 "sumber": "katalog khusus", "inv": ""}
-        for c in cust.values():
+        kom = self.get_komisi_setting()
+        for key, c in cust.items():
             c["items"] = sorted(c["items"].values(), key=lambda i: i["nama"].lower())
+            c["komisi"] = kom.get(key)
             out["customer"].append(c)
 
         # --- supplier ---

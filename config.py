@@ -152,6 +152,8 @@ SHEET_STAFF = "Staff"
 SHEET_PENGAJUAN = "PengajuanStok"
 SHEET_PERMINTAAN = "PermintaanBarang"
 SHEET_PENERIMAAN = "PenerimaanPO"
+SHEET_KOMISI = "Komisi"               # setting komisi jalur belakang per customer (RAHASIA)
+SHEET_KOMISI_CATAT = "KomisiCatatan"  # komisi per invoice yang udah lunas: belum/sudah dibayar
 SHEET_PENGIRIMAN = "PengirimanOrder"
 import hashlib as _hl
 WEB_SECRET = os.getenv("WEB_SECRET") or _hl.sha256(((TELEGRAM_BOT_TOKEN or "dev") + "|web").encode()).hexdigest()

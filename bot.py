@@ -323,6 +323,7 @@ Command di bawah ini cadangan aja kalau mau lebih pasti/cepat:
 /dokumen <no invoice atau nama customer> — cetak ulang invoice + surat jalan
 (kalau customer punya banyak invoice, bot kasih daftar buat dipilih)
 /lunas <no invoice atau nama customer> — tandai order sudah dibayar
+/komisi — komisi jalur belakang per customer (rahasia, chat pribadi)
 /cekharga <customer/supplier/barang> — LIHAT harga (mis. /cekharga baso yen, /cekharga hippe)
 /harga <kategori/nama> <harga> [beli] — ubah harga banyak produk sekaligus (ada preview)
 /stok [nama] — cek stok menipis / stok barang tertentu\n/staffbaru <nama> — bikin akun staff gudang (ID+password)\n/staff — daftar staff, /staffreset <id>, /staffoff <id>\n/linkdashboard — link dashboard stok (lu aja)\n/pengingat — lihat jadwal pengingat (kontra bon, tagihan, bayar supplier)
@@ -429,6 +430,7 @@ async def _do_lunas(update, key):
         f"✅ {no_invoice} ditandai *Lunas* ({rupiah(total)}), udah dicatat ke Kas Masuk.",
         parse_mode=ParseMode.MARKDOWN,
     )
+    await _kabar_komisi(update.get_bot(), no_invoice)
 
 
 async def _ask_lunas(update, key):
@@ -1580,6 +1582,22 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         total = sheets.mark_order_lunas(inv)
         sheets.add_kas_entry("Masuk", "Penjualan", total, keterangan=f"Pelunasan {inv}", ref=inv)
         await query.edit_message_text(f"✅ {inv} ditandai Lunas ({rupiah(total)}), udah dicatat ke Kas Masuk.")
+        await _kabar_komisi(context.bot, inv)
+        return
+
+    if data.startswith("km_ok:"):
+        inv = data.split(":", 1)[1]
+        r = _sheets().bayar_komisi(inv)
+        if not r:
+            await query.edit_message_text(f"Komisi {inv} udah dibayar / gak ada.")
+        else:
+            await query.edit_message_text(
+                f"✅ Komisi {inv} ke {r.get('Penerima') or '-'} {rupiah(float(r.get('Jumlah') or 0))} "
+                "ditandai SUDAH DIBAYAR & dicatat ke Kas Keluar (Komisi).")
+        return
+    if data.startswith("km_nanti:"):
+        inv = data.split(":", 1)[1]
+        await query.edit_message_text(f"Oke, komisi {inv} masih tercatat BELUM dibayar. Cek kapan aja di /komisi atau dashboard.")
         return
 
     if data.startswith("rm:"):
@@ -2260,6 +2278,7 @@ async def _handle_reminder_callback(update, context, data):
         total = sheets.mark_order_lunas(ref)
         sheets.add_kas_entry("Masuk", "Penjualan", total, keterangan=f"Pelunasan {ref}", ref=ref)
         await query.edit_message_text(f"✅ {ref} ({nama}) ditandai Lunas {rupiah(total)}, udah dicatat ke Kas Masuk.")
+        await _kabar_komisi(context.bot, ref)
         return
 
     if act == "supok":
@@ -2342,6 +2361,86 @@ def _parse_angka_harga(tok):
     return v * 1000 if m.group(2) else v
 
 
+async def _kabar_komisi(bot, inv):
+    """Invoice baru lunas & customer-nya punya komisi -> ingetin owner di CHAT
+    PRIBADI aja (gak ke grup, ini jalur belakang)."""
+    import asyncio
+    try:
+        r = await asyncio.to_thread(_sheets().get_komisi_catat, inv)
+    except Exception:
+        logger.exception("gagal cek komisi %s", inv)
+        return
+    if not r or str(r.get("Status", "")) != "Belum":
+        return
+    qty, rate, jml = float(r.get("Qty") or 0), float(r.get("Rp_per_Satuan") or 0), float(r.get("Jumlah") or 0)
+    text = (f"🤫 KOMISI (jalur belakang)\n\n{inv} — {r.get('Customer')} udah LUNAS.\n"
+            f"Bayar komisi ke {r.get('Penerima') or '(penerima belum diisi)'}:\n"
+            f"{qty:g} × {rupiah(rate)} = {rupiah(jml)}")
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Sudah dibayar", callback_data=f"km_ok:{inv}"),
+                                InlineKeyboardButton("⏳ Nanti", callback_data=f"km_nanti:{inv}")]])
+    for chat_id in list(dict.fromkeys(c for c in config.OWNER_TELEGRAM_IDS if c)):
+        try:
+            await bot.send_message(chat_id=chat_id, text=text, reply_markup=kb)
+        except Exception:
+            logger.exception("gagal kirim pengingat komisi ke %s", chat_id)
+
+
+@owner_only
+async def komisi_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/komisi -> daftar; /komisi <customer> <rp per satuan> [penerima] -> pasang/ubah; rp 0 -> hapus."""
+    import re as _re
+    sheets = _sheets()
+    args = list(context.args or [])
+    if update.effective_chat and update.effective_chat.type != "private":
+        await update.effective_message.reply_text("🤫 Komisi itu rahasia — buka di chat pribadi sama bot ya, jangan di grup.")
+        return
+    if args:
+        idx = next((i for i, a in enumerate(args) if _parse_angka_harga(a) is not None and i > 0), None)
+        if idx is None:
+            await update.effective_message.reply_text(
+                "Format: /komisi <customer> <rupiah per satuan> [nama penerima]\n"
+                "Contoh: /komisi baso yen 100 Pak Andi\nHapus: /komisi baso yen 0")
+            return
+        cust, rate, penerima = " ".join(args[:idx]), _parse_angka_harga(args[idx]), " ".join(args[idx + 1:])
+        # pakai nama customer yang udah ada di order kalau mirip
+        nama = cust
+        try:
+            hasil = sheets.cek_harga(cust)["customer"]
+            if len(hasil) == 1:
+                nama = hasil[0]["nama"]
+        except Exception:
+            pass
+        aksi = sheets.set_komisi(nama, rate, penerima)
+        if aksi == "hapus":
+            await update.effective_message.reply_text(f"🗑 Komisi {nama} dihapus.")
+        elif aksi is None:
+            await update.effective_message.reply_text(f"{nama} memang gak punya komisi.")
+        else:
+            await update.effective_message.reply_text(
+                f"✅ Komisi {nama}: {rupiah(rate)} per satuan (semua barang)"
+                + (f" → ke {penerima}" if penerima else "") +
+                f".\nNanti tiap invoice {nama} LUNAS, gua ingetin bayar komisinya di sini (chat pribadi).")
+        return
+    st = sheets.get_komisi_setting()
+    belum = sheets.get_komisi_belum()
+    lines = ["🤫 KOMISI JALUR BELAKANG", ""]
+    if st:
+        for v in sorted(st.values(), key=lambda v: v["customer"].lower()):
+            lines.append(f"• {v['customer']}: {rupiah(v['rate'])}/satuan" + (f" → {v['penerima']}" if v["penerima"] else ""))
+    else:
+        lines.append("Belum ada customer yang pakai komisi.")
+    lines += ["", "Pasang: /komisi baso yen 100 Pak Andi", "Hapus: /komisi baso yen 0"]
+    kb = None
+    if belum:
+        tot = sum(float(r.get("Jumlah") or 0) for r in belum)
+        lines += ["", f"⏳ BELUM DIBAYAR ({len(belum)}) — total {rupiah(tot)}:"]
+        for r in belum[:20]:
+            lines.append(f"• {r.get('No_Invoice')} {r.get('Customer')} → {r.get('Penerima') or '-'}: {rupiah(float(r.get('Jumlah') or 0))}")
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"✅ Bayar {r.get('No_Invoice')} ({rupiah(float(r.get('Jumlah') or 0))})",
+                                                         callback_data=f"km_ok:{r.get('No_Invoice')}")] for r in belum[:10]])
+    await update.effective_message.reply_text("\n".join(lines), reply_markup=kb)
+
+
 @owner_only
 async def cekharga_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = " ".join(context.args or []).strip()
@@ -2372,6 +2471,9 @@ async def _do_cek_harga(update, q):
         for i in c["items"][:60]:
             ket = f"terakhir {_tgl_pendek(i['tgl'])}" if i["tgl"] else i["sumber"]
             lines.append(f"• {i['nama']} — {rupiah(i['harga'])}/{i['satuan'] or '-'}  ({ket})")
+        k = c.get("komisi")
+        if k and update.effective_chat and update.effective_chat.type == "private":
+            lines.insert(1, f"🤫 Komisi: {rupiah(k['rate'])}/satuan" + (f" → {k['penerima']}" if k["penerima"] else ""))
         if not c["items"]:
             lines.append("(belum pernah order & gak ada harga khusus)")
         elif len(c["items"]) > 60:
@@ -2577,6 +2679,9 @@ async def _notify_staff_event(app, kind, data):
         text = f"🛒 {data['staff']} minta barang (perlu dipesan):\n\n{baris}"
     elif kind == "kirim":
         text = f"🚚 {data['staff']} menandai {data['invoice']} ({data['customer']}) sudah dikirim."
+    elif kind == "komisi":
+        await _kabar_komisi(app.bot, data["invoice"])
+        return
     elif kind == "diputuskan":
         # disetujui/ditolak dari dashboard -> ilangin tombol di semua pesan Telegram-nya
         await _tutup_pesan_pengajuan(app.bot, data["batch"], data["approve"], data.get("n"), "dashboard")
@@ -2698,6 +2803,7 @@ def main():
     app.add_handler(CommandHandler("harga", hargakategori_cmd))
     app.add_handler(CommandHandler("hargakategori", hargakategori_cmd))
     app.add_handler(CommandHandler("cekharga", cekharga_cmd))
+    app.add_handler(CommandHandler("komisi", komisi_cmd))
     app.add_handler(CommandHandler("importgrandia", importgrandia_cmd))
     app.add_error_handler(error_handler)
     app.add_handler(CommandHandler("lunas", lunas_cmd))

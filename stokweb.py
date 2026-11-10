@@ -336,6 +336,20 @@ def add_stok_routes(app, sheets_getter, notify=None):
         await asyncio.to_thread(sheets_getter().tutup_po, no, "Owner (dashboard)")
         return web.json_response({"ok": True})
 
+    async def po_permintaan(request):
+        if not await _link(request, ("@owner",)):
+            return web.json_response({"ok": False}, status=404)
+        ids = [str(x)[:20] for x in ((await request.json()).get("ids") or [])][:100]
+        hasil, gagal = await asyncio.to_thread(sheets_getter().buat_po_dari_permintaan, ids)
+        if hasil and notify is not None:
+            try:
+                await notify("po_dibuat", {"pos": hasil})
+            except Exception:
+                logger.exception("gagal kirim PO ke Telegram")
+        return web.json_response({"ok": True, "pos": [{"no_po": h["no_po"], "supplier": h["supplier"], "total": h["total"]}
+                                                      for h in hasil], "gagal": gagal})
+
+    app.router.add_post("/dashboard/{token}/popermintaan", po_permintaan)
     app.router.add_post("/dashboard/{token}/tutuppo", tutup_po)
     app.router.add_post("/dashboard/{token}/bayarkomisi", bayar_komisi)
     app.router.add_post("/dashboard/{token}/kirim", tandai_kirim)

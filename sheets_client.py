@@ -1845,7 +1845,7 @@ class SheetsClient:
             rows.append(["Q" + uuid.uuid4().hex[:6].upper(), ts, staff, e["item_code"], e.get("nama", ""),
                          e["qty"], e.get("satuan", ""), e.get("catatan", ""), "Baru"])
         self._ws(config.SHEET_PERMINTAAN).append_rows(rows, value_input_option="RAW")
-        return len(rows)
+        return [r[0] for r in rows]
 
     def get_permintaan(self, staff=None, status=None, n=50):
         rows = self._records(self._ws(config.SHEET_PERMINTAAN))
@@ -1862,6 +1862,56 @@ class SheetsClient:
                 ws.batch_update([{"range": f"I{i}", "values": [[status]]}])
                 return True
         return False
+
+    _po_minta_lock = threading.Lock()
+
+    def buat_po_dari_permintaan(self, pids):
+        """Permintaan barang staff (status Baru) -> PO otomatis, dikelompokin per
+        Supplier (kolom Supplier di PriceList), harga = Harga_Beli. Balikin
+        (daftar_po, gagal): daftar_po = [{no_po, supplier, items, total}],
+        gagal = [{nama, alasan}] buat barang yang supplier/harga belinya kosong."""
+        with self._po_minta_lock:
+            want = {str(p) for p in pids}
+            rows = [r for r in self.get_permintaan(None, "Baru", 500) if str(r.get("ID", "")) in want]
+            pl = {str(p.get("Item_Code", "")).strip().upper(): p for p in self.get_price_list()}
+            per_sup, gagal = {}, []
+            for r in rows:
+                p = pl.get(str(r.get("Item_Code", "")).strip().upper())
+                sup = str((p or {}).get("Supplier", "") or "").strip()
+                hb = self._f((p or {}).get("Harga_Beli"))
+                if not p or not sup or hb <= 0:
+                    gagal.append({"id": r.get("ID"), "nama": r.get("Nama", ""),
+                                  "alasan": "Supplier kosong di PriceList" if p and not sup else
+                                  "Harga beli kosong di PriceList" if p else "Barang gak ada di PriceList"})
+                    continue
+                per_sup.setdefault(sup, []).append((r, p, hb))
+            hasil = []
+            for sup, isi in per_sup.items():
+                gabung = {}
+                for r, p, hb in isi:
+                    k = str(p["Item_Code"]).strip().upper()
+                    g = gabung.setdefault(k, {"nama_item": self._label_produk(p), "qty": 0.0,
+                                              "satuan": str(p.get("Satuan", "") or r.get("Satuan", "")),
+                                              "harga_satuan": hb, "_ids": []})
+                    g["qty"] += self._f(r.get("Qty"))
+                    g["_ids"].append(str(r.get("ID")))
+                items = list(gabung.values())
+                no_po, total = self.add_purchase_order(sup, [{k: v for k, v in i.items() if k != "_ids"} for i in items])
+                for i in items:
+                    for pid in i["_ids"]:
+                        self.set_permintaan_status(pid, f"PO {no_po}")
+                hasil.append({"no_po": no_po, "supplier": sup, "total": total,
+                              "items": [{k: v for k, v in i.items() if k != "_ids"} for i in items]})
+            return hasil, gagal
+
+    def permintaan_satu_kiriman(self, pid):
+        """Semua ID permintaan (status Baru) yang dikirim barengan sama `pid`."""
+        rows = self.get_permintaan(None, None, 500)
+        r0 = next((r for r in rows if str(r.get("ID", "")) == pid), None)
+        if not r0:
+            return []
+        return [str(r["ID"]) for r in rows if r.get("Waktu") == r0.get("Waktu") and r.get("Staff") == r0.get("Staff")
+                and r.get("Status") == "Baru"]
 
     # pengiriman order (staff tandai barang udah keluar/dikirim)
     def get_pengiriman_map(self):

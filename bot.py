@@ -1728,6 +1728,26 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _kabar_komisi(context.bot, inv)
         return
 
+    if data == "pm_nanti":
+        await query.edit_message_reply_markup(reply_markup=None)
+        return
+    if data.startswith("pm_po:"):
+        import asyncio
+        sheets = _sheets()
+        ids = await asyncio.to_thread(sheets.permintaan_satu_kiriman, data.split(":", 1)[1])
+        if not ids:
+            await query.edit_message_text("Permintaan ini udah diproses sebelumnya (udah dibikin PO / ditandai beres).")
+            return
+        hasil, gagal = await asyncio.to_thread(sheets.buat_po_dari_permintaan, ids)
+        teks = [f"✅ {h['no_po']} → {h['supplier']} ({rupiah(h['total'])})" for h in hasil]
+        if gagal:
+            teks += ["", "⚠️ Belum bisa dibikinin PO:"] + [f"• {g['nama']} — {g['alasan']}" for g in gagal] + \
+                    ["Lengkapi kolom Supplier / Harga_Beli di PriceList, terus klik Buat PO di dashboard (tab Gudang)."]
+        await query.edit_message_text("\n".join(teks) or "Gak ada yang diproses.")
+        for h in hasil:
+            await _kirim_po_otomatis(context.bot, h)
+        return
+
     if data == "ac_no":
         context.user_data.pop("pending_atur", None)
         await query.edit_message_text("Oke, gak jadi.")
@@ -2873,7 +2893,15 @@ async def _notify_staff_event(app, kind, data):
                                         InlineKeyboardButton("❌ Tolak", callback_data=f"pg_no:{data['batch']}")]])
     elif kind == "permintaan":
         baris = "\n".join(f"• {e['nama']}: {e['qty']:g} {e['satuan']}" for e in data["ents"][:25])
-        text = f"🛒 {data['staff']} minta barang (perlu dipesan):\n\n{baris}"
+        text = (f"🛒 {data['staff']} minta barang (perlu dipesan):\n\n{baris}\n\n"
+                "Klik Buat PO → PO otomatis per supplier (supplier & harga beli dari PriceList), PDF-nya langsung dikirim.")
+        if data.get("pid"):
+            markup = InlineKeyboardMarkup([[InlineKeyboardButton("📝 Buat PO", callback_data=f"pm_po:{data['pid']}"),
+                                            InlineKeyboardButton("Nanti", callback_data="pm_nanti")]])
+    elif kind == "po_dibuat":
+        for h in data["pos"]:
+            await _kirim_po_otomatis(app.bot, h)
+        return
     elif kind == "kirim":
         text = f"🚚 {data['staff']} menandai {data['invoice']} ({data['customer']}) sudah dikirim."
     elif kind == "komisi":
@@ -2901,6 +2929,28 @@ async def _notify_staff_event(app, kind, data):
             await asyncio.to_thread(_sheets().set_pesan_tg, data["batch"], refs)
         except Exception:
             logger.exception("gagal simpen id pesan pengajuan")
+
+
+async def _kirim_po_otomatis(bot, h, ke_chat=None):
+    """Kirim PDF PO yang dibikin otomatis dari permintaan staff ke owner + topik PO."""
+    try:
+        img, pdf = documents.generate_po_image(h["no_po"], h["supplier"], h["items"])
+    except Exception:
+        logger.exception("gagal bikin PDF PO %s", h["no_po"])
+        return
+    cap = f"Purchase Order {h['no_po']} — {h['supplier']} ({rupiah(h['total'])})\nDari permintaan gudang. Forward ke supplier ya."
+    chats = [ke_chat] if ke_chat else list(dict.fromkeys(c for c in config.OWNER_TELEGRAM_IDS if c))
+    for chat_id in chats:
+        try:
+            pdf.seek(0)
+            await bot.send_document(chat_id=chat_id, document=pdf, filename=f"{h['no_po']}.pdf", caption=cap)
+        except Exception:
+            logger.exception("gagal kirim PO ke %s", chat_id)
+    try:
+        pdf.seek(0)
+        await _mirror(bot, "po", skip_chat=ke_chat, document=pdf, filename=f"{h['no_po']}.pdf", caption=cap)
+    except Exception:
+        logger.exception("gagal mirror PO")
 
 
 async def _tutup_pesan_pengajuan(bot, batch, approve, n, lewat, skip=None):

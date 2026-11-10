@@ -269,9 +269,9 @@ def add_staff_routes(app, sheets_getter, notify):
         ents = [e for e in await _entries(sheets, body) if e["qty"] > 0]
         if not ents:
             return web.json_response({"ok": False, "error": "Belum ada jumlah yang valid"}, status=400)
-        await asyncio.to_thread(sheets.add_permintaan, st["nama"], ents)
+        ids = await asyncio.to_thread(sheets.add_permintaan, st["nama"], ents)
         try:
-            await notify("permintaan", {"staff": st["nama"], "ents": ents})
+            await notify("permintaan", {"staff": st["nama"], "ents": ents, "pid": ids[0] if ids else ""})
         except Exception:
             logger.exception("gagal notif permintaan")
         return web.json_response({"ok": True})

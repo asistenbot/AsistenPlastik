@@ -328,6 +328,7 @@ Command di bawah ini cadangan aja kalau mau lebih pasti/cepat:
 (kalau customer punya banyak invoice, bot kasih daftar buat dipilih)
 /lunas <no invoice atau nama customer> — tandai order sudah dibayar
 /supplier <barang/kategori> ke <supplier> — isi supplier di PriceList (buat PO otomatis)
+/cektransfer <nominal> [customer] — cari bon mana yang cocok sama transfer masuk
 /komisi — komisi jalur belakang per customer (rahasia, chat pribadi)
 /cekharga <customer/supplier/barang> — LIHAT harga (mis. /cekharga baso yen, /cekharga hippe)
 /harga <kategori/nama> <harga> [beli] — ubah harga banyak produk sekaligus (ada preview)
@@ -435,6 +436,68 @@ def _alokasi_transfer(c, nominal):
             pilih.append(i["invoice"])
             sisa -= i["total"]
     return pilih, sisa
+
+
+def _baca_nominal(t):
+    import re as _re
+    t = str(t).lower().replace("rp", "").replace(" ", "")
+    m = _re.search(r"(\d[\d.,]*)(jt|juta|rb|ribu|k)?", t)
+    if not m:
+        return None
+    a, sat = m.group(1), m.group(2)
+    try:
+        if sat in ("jt", "juta", "rb", "ribu", "k"):   # 1,2jt / 1.2jt / 750rb
+            return float(a.replace(",", ".")) * (1_000_000 if sat in ("jt", "juta") else 1_000)
+        return float(a.replace(".", "").replace(",", ""))   # 1.223.500
+    except ValueError:
+        return None
+
+
+async def _do_cek_transfer(update, context, nominal, customer=""):
+    import asyncio
+    import uuid as _uuid
+    h = await asyncio.to_thread(_sheets().cocokkan_transfer, nominal, customer)
+    hasil = h["pas"] or h["mirip"]
+    if not hasil:
+        await update.effective_message.reply_text(
+            f"🔎 Transfer {rupiah(nominal)}" + (f" dari {customer}" if customer else "") +
+            ": gak ketemu kombinasi bon yang pas (dicek sampai 6 bon per customer, termasuk yang udah lunas 4 bulan terakhir).\n"
+            "Mungkin ada potongan / biaya transfer, atau bayar sebagian. Cek /piutang <nama>.")
+        return
+    lines = [f"🔎 Transfer {rupiah(nominal)}" + (f" dari {customer}" if customer else "") + " cocok sama:", ""]
+    rows = []
+    for n, m in enumerate(hasil[:5], start=1):
+        tot = sum(o["total"] for o in m["invoices"])
+        judul = f"{n}. {m['customer']} — {len(m['invoices'])} bon = {rupiah(tot)}"
+        if m["selisih"]:
+            judul += f" (selisih {rupiah(abs(m['selisih']))} {'kurang' if m['selisih'] < 0 else 'lebih'} — mungkin biaya transfer)"
+        lines.append(judul)
+        for o in m["invoices"]:
+            st = f"⚠️ UDAH ditandai lunas {_tgl_pendek(o['bayar'])}" if o["status"] == "Lunas" else "belum lunas"
+            lines.append(f"   • {o['invoice']} ({_tgl_pendek(o['tgl'])}) {rupiah(o['total'])} — {st}")
+        if m["sudah"] and m["belum"]:
+            lines.append("   ↳ sebagian udah lunas duluan — cek, mungkin ada yang kepencet")
+        elif m["sudah"] and not m["belum"]:
+            lines.append("   ↳ semua udah ditandai lunas — transfer ini mungkin buat bon ini (udah beres)")
+        lines.append("")
+        if m["belum"]:
+            key = _uuid.uuid4().hex[:8]
+            context.bot_data.setdefault("tf_lunas", {})[key] = m["belum"]
+            rows.append([InlineKeyboardButton(f"✅ #{n}: lunasin {len(m['belum'])} bon yang belum", callback_data=f"tfl:{key}")])
+    if len(hasil) > 1:
+        lines.append("Ada beberapa kemungkinan — pilih yang sesuai sama bukti transfernya.")
+    await update.effective_message.reply_text("\n".join(lines).strip(), reply_markup=InlineKeyboardMarkup(rows) if rows else None)
+
+
+@owner_only
+async def cektransfer_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = list(context.args or [])
+    idx = next((i for i, a in enumerate(args) if _baca_nominal(a)), None)
+    if idx is None:
+        await update.effective_message.reply_text(
+            "Format: /cektransfer <nominal> [nama customer]\nContoh: /cektransfer 1.223.500\n/cektransfer 1223500 shu guo")
+        return
+    await _do_cek_transfer(update, context, _baca_nominal(args[idx]), " ".join(args[:idx] + args[idx + 1:]))
 
 
 @owner_only
@@ -976,6 +1039,15 @@ async def _route_text(update, context, text):
     sini dulu -- ditebak dulu maksudnya (order? nanya laporan? bayar utang?)
     pakai AI, biar gak perlu apal command. Kalau gagal nebak / gak yakin,
     default-nya tetep dianggap ORDER customer (paling aman)."""
+    import re as _re_tf
+    m_tf = _re_tf.match(r"^\s*(?:cek\s+)?(?:transfer(?:an)?|tf|trf|ditransfer|masuk transfer)\b\s*(?:dari\s+)?(.*)$", text, _re_tf.I)
+    if m_tf:
+        sisa = m_tf.group(1)
+        mn = _re_tf.search(r"(?:rp\.?\s*)?\d[\d.,]*\s*(?:jt|juta|rb|ribu|k)?", sisa, _re_tf.I)
+        if mn and _baca_nominal(mn.group(0)):
+            cust = (sisa[:mn.start()] + " " + sisa[mn.end():]).replace("dari", " ").strip(" ,.-")
+            await _do_cek_transfer(update, context, _baca_nominal(mn.group(0)), cust)
+            return
     try:
         if await _cek_atur_harga_komisi(update, context, text):
             return
@@ -1891,6 +1963,21 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await _kabar_komisi(context.bot, n)
         return
 
+    if data.startswith("tfl:"):
+        invs = context.bot_data.get("tf_lunas", {}).pop(data[4:], None)
+        if not invs:
+            await query.edit_message_reply_markup(reply_markup=None)
+            await update.effective_chat.send_message("Tombol udah dipakai / kadaluarsa. Cek ulang: /cektransfer <nominal>")
+            return
+        import asyncio
+        hasil = await asyncio.to_thread(_sheets().lunas_banyak, invs)
+        await query.edit_message_reply_markup(reply_markup=None)
+        await update.effective_chat.send_message(
+            f"✅ {len(hasil)} bon LUNAS ({rupiah(sum(t for _, t in hasil))}), dicatat Kas Masuk:\n" + "\n".join(f"• {n} {rupiah(t)}" for n, t in hasil)
+            if hasil else "Bon-bon itu udah lunas semua.")
+        for n, _ in hasil:
+            await _kabar_komisi(context.bot, n)
+        return
     if data in ("bd_ok", "bd_no"):
         if data == "bd_no":
             await query.edit_message_text("Oke, gak dihapus.")
@@ -3368,6 +3455,7 @@ def main():
     app.add_handler(CommandHandler("komisi", komisi_cmd))
     app.add_handler(CommandHandler("supplier", supplier_cmd))
     app.add_handler(CommandHandler("bersihindobel", bersihindobel_cmd))
+    app.add_handler(CommandHandler("cektransfer", cektransfer_cmd))
     app.add_handler(CommandHandler("importgrandia", importgrandia_cmd))
     app.add_error_handler(error_handler)
     app.add_handler(CommandHandler("lunas", lunas_cmd))

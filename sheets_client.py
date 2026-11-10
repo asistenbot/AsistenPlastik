@@ -1076,6 +1076,62 @@ class SheetsClient:
                 c["nama"] = o["nama"]
         return out
 
+    def cocokkan_transfer(self, nominal, customer="", hari=120, maks=6):
+        """Transfer masuk Rp `nominal` -> cari kombinasi bon (per customer) yang jumlahnya PAS.
+        Bon belum lunas DAN yang udah ditandai lunas (`hari` terakhir) ikut dicek, biar ketahuan
+        kalau ada yang kepencet lunas / lupa dipencet. Balikin {"pas": [...], "mirip": [...]}."""
+        import itertools
+        target = int(round(nominal))
+        batas = (_today_date() - datetime.timedelta(days=hari)).strftime("%Y-%m-%d")
+        inv = {}
+        for r in self.get_all_orders():
+            no = str(r.get("No_Invoice", "")).strip()
+            st = str(r.get("Status", ""))
+            if not no or st == "Batal":
+                continue
+            o = inv.setdefault(no, {"invoice": no, "customer": str(r.get("Nama_Customer", "")).strip(),
+                                    "tgl": str(r.get("Timestamp", ""))[:10], "status": st,
+                                    "bayar": str(r.get("Tanggal_Bayar", ""))[:10], "total": 0.0})
+            o["total"] += self._f(r.get("Subtotal")) + self._f(r.get("Ongkir"))
+        grup = {}
+        kc = _norm(customer)
+        for o in inv.values():
+            if o["status"] == "Lunas" and (o["bayar"] or o["tgl"]) < batas:
+                continue
+            k = _norm(o["customer"])
+            if kc and not (kc in k or k in kc):
+                continue
+            grup.setdefault(k, []).append(o)
+        pas, mirip = [], []
+        for k, lst in grup.items():
+            # bon belum lunas dulu, terus yang lunas paling baru; maks 22 bon per customer
+            lst = sorted([o for o in lst if o["status"] != "Lunas"], key=lambda o: o["tgl"]) + \
+                  sorted([o for o in lst if o["status"] == "Lunas"], key=lambda o: o["bayar"], reverse=True)
+            lst = lst[:22]
+            amt = [int(round(o["total"])) for o in lst]
+            for n in range(1, min(maks, len(lst)) + 1):
+                for comb in itertools.combinations(range(len(lst)), n):
+                    s_ = sum(amt[i] for i in comb)
+                    d = target - s_
+                    if abs(d) <= 1:
+                        pas.append([lst[i] for i in comb])
+                    elif 0 < abs(d) <= max(target * 0.01, 5000):
+                        mirip.append(([lst[i] for i in comb], d))
+                if len(pas) > 40:
+                    break
+
+        def skor(c):
+            lunas = sum(1 for o in c if o["status"] == "Lunas")
+            return (len(c), lunas, min(o["tgl"] for o in c))   # bon paling dikit = paling masuk akal
+
+        def bentuk(c, d=0):
+            return {"customer": c[0]["customer"], "selisih": d, "invoices": sorted(c, key=lambda o: o["tgl"]),
+                    "belum": [o["invoice"] for o in c if o["status"] != "Lunas"],
+                    "sudah": [o["invoice"] for o in c if o["status"] == "Lunas"]}
+        pas.sort(key=skor)
+        mirip.sort(key=lambda x: (abs(x[1]), skor(x[0])))
+        return {"pas": [bentuk(c) for c in pas[:6]], "mirip": [bentuk(c, d) for c, d in mirip[:4]] if not pas else []}
+
     _lunas_lock = threading.Lock()
 
     def lunas_banyak(self, invoices):

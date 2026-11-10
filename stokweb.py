@@ -419,6 +419,24 @@ def add_stok_routes(app, sheets_getter, notify=None):
         total = await asyncio.to_thread(sheets_getter().unmark_order_lunas, inv)
         return web.json_response({"ok": total is not None, "total": total or 0})
 
+    async def cek_transfer(request):
+        if not await _link(request, ("@owner",)):
+            return web.json_response({"ok": False}, status=404)
+        body = await request.json()
+        import re as _re
+        raw = str(body.get("nominal", "")).lower().replace("rp", "").replace(" ", "")
+        m = _re.search(r"(\d[\d.,]*)(jt|juta|rb|ribu|k)?", raw)
+        if not m:
+            return web.json_response({"ok": False, "error": "Nominal salah"}, status=400)
+        a, sat = m.group(1), m.group(2)
+        try:
+            n = float(a.replace(",", ".")) * (1e6 if sat in ("jt", "juta") else 1e3) if sat else float(a.replace(".", "").replace(",", ""))
+        except ValueError:
+            return web.json_response({"ok": False, "error": "Nominal salah"}, status=400)
+        h = await asyncio.to_thread(sheets_getter().cocokkan_transfer, n, str(body.get("customer", "")).strip())
+        return web.json_response({"ok": True, "nominal": n, **h})
+
+    app.router.add_post("/dashboard/{token}/cektransfer", cek_transfer)
     app.router.add_post("/dashboard/{token}/batallunas", batal_lunas)
     app.router.add_post("/dashboard/{token}/lunasbanyak", lunas_banyak)
     app.router.add_post("/dashboard/{token}/setsupplier", setsupplier)

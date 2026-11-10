@@ -399,6 +399,20 @@ def add_stok_routes(app, sheets_getter, notify=None):
             return web.json_response({"ok": False}, status=404)
         return web.json_response({"ok": True, "suppliers": await asyncio.to_thread(sheets_getter().get_supplier_names)})
 
+    async def lunas_banyak(request):
+        if not await _link(request, ("@owner",)):
+            return web.json_response({"ok": False}, status=404)
+        invs = [str(x).strip()[:40] for x in ((await request.json()).get("invoices") or [])][:200]
+        hasil = await asyncio.to_thread(sheets_getter().lunas_banyak, invs)
+        if notify is not None:
+            for n, _ in hasil:
+                try:
+                    await notify("komisi", {"invoice": n})
+                except Exception:
+                    logger.exception("gagal kabar komisi")
+        return web.json_response({"ok": True, "n": len(hasil), "total": sum(t for _, t in hasil)})
+
+    app.router.add_post("/dashboard/{token}/lunasbanyak", lunas_banyak)
     app.router.add_post("/dashboard/{token}/setsupplier", setsupplier)
     app.router.add_get("/dashboard/{token}/suppliers", suppliers)
     app.router.add_post("/dashboard/{token}/setstok", setstok)

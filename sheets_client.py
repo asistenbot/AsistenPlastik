@@ -1050,6 +1050,50 @@ class SheetsClient:
             out[nama] = out.get(nama, 0) + subtotal + ongkir
         return out
 
+    def get_piutang_detail(self):
+        """Piutang per customer (nama yang beda huruf besar/kecil/spasi digabung):
+        {kunci: {kunci, nama, total, invoices: [{invoice, tgl, total, umur}]}} urut invoice terlama dulu."""
+        hari_ini = _today_date()
+        inv = {}
+        for r in self.get_pending_orders():
+            no = str(r.get("No_Invoice", "")).strip()
+            if not no:
+                continue
+            o = inv.setdefault(no, {"invoice": no, "nama": str(r.get("Nama_Customer", "-")).strip() or "-",
+                                    "tgl": str(r.get("Timestamp", ""))[:10], "total": 0.0})
+            o["total"] += self._f(r.get("Subtotal")) + self._f(r.get("Ongkir"))
+        out = {}
+        for o in sorted(inv.values(), key=lambda o: (o["tgl"], o["invoice"])):
+            k = _norm(o["nama"]) or "-"
+            c = out.setdefault(k, {"kunci": k, "nama": o["nama"], "total": 0.0, "invoices": []})
+            try:
+                umur = (hari_ini - datetime.datetime.strptime(o["tgl"], "%Y-%m-%d").date()).days
+            except ValueError:
+                umur = 0
+            c["invoices"].append({**o, "umur": umur})
+            c["total"] += o["total"]
+            if o["nama"].isupper() or len(o["nama"]) > len(c["nama"]):
+                c["nama"] = o["nama"]
+        return out
+
+    _lunas_lock = threading.Lock()
+
+    def lunas_banyak(self, invoices):
+        """Customer transfer sekaligus: tandai banyak invoice Lunas + catat Kas Masuk
+        per invoice (biar /batallunas tetap bisa). Balikin [(invoice, total)] yang berhasil."""
+        hasil = []
+        with self._lunas_lock:
+            pending = {str(r.get("No_Invoice", "")) for r in self.get_pending_orders()}
+            for no in dict.fromkeys(str(i).strip() for i in invoices):
+                if no not in pending:
+                    continue
+                total = self.mark_order_lunas(no)
+                if total is None:
+                    continue
+                self.add_kas_entry("Masuk", "Penjualan", total, keterangan=f"Pelunasan {no}", ref=no)
+                hasil.append((no, total))
+        return hasil
+
     # ---------------- SUPPLIERS ----------------
 
     def get_suppliers(self):

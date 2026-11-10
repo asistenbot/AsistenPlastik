@@ -377,24 +377,69 @@ async def batal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text("Oke, dibatalin.")
 
 
-async def _do_piutang(update):
-    summary = _sheets().get_piutang_summary()
-    if not summary:
+async def _do_piutang(update, cari=""):
+    import asyncio
+    det = await asyncio.to_thread(_sheets().get_piutang_detail)
+    if not det:
         await update.effective_message.reply_text("Gak ada piutang, semua customer udah lunas 🎉")
         return
-    lines = ["*Piutang customer (belum lunas):*", ""]
-    total = 0
-    for nama, jumlah in sorted(summary.items(), key=lambda x: -x[1]):
-        lines.append(f"• {nama}: {rupiah(jumlah)}")
-        total += jumlah
-    lines.append("")
-    lines.append(f"*Total piutang: {rupiah(total)}*")
-    await _send_text(update, "\n".join(lines))
+    if cari:
+        k = __import__("re").sub(r"[^a-z0-9]", "", cari.lower())
+        cocok = [c for c in det.values() if k and (k in c["kunci"] or c["kunci"] in k)]
+        if len(cocok) == 1:
+            await update.effective_message.reply_text(**_piutang_detail_msg(cocok[0], set()))
+            return
+        if not cocok:
+            await update.effective_message.reply_text(f"'{cari}' gak punya piutang (atau namanya beda). Ketik /piutang buat liat semua.")
+            return
+        det = {c["kunci"]: c for c in cocok}
+    lines = ["💰 PIUTANG CUSTOMER (belum lunas)", ""]
+    rows = []
+    for c in sorted(det.values(), key=lambda c: -c["total"]):
+        lines.append(f"• {c['nama']}: {rupiah(c['total'])} ({len(c['invoices'])} invoice)")
+        rows.append([InlineKeyboardButton(f"📄 {c['nama'][:24]} — {rupiah(c['total'])}", callback_data=f"pt:{c['kunci'][:55]}")])
+    lines += ["", f"Total: {rupiah(sum(c['total'] for c in det.values()))}", "", "Klik customer buat liat rincian & tandai lunas."]
+    await update.effective_message.reply_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(rows[:20]))
+
+
+def _piutang_detail_msg(c, sel):
+    """Rincian 1 customer + tombol centang invoice + lunas."""
+    lines = [f"📄 PIUTANG {c['nama'].upper()}", ""]
+    for i in c["invoices"]:
+        tanda = "☑️" if i["invoice"] in sel else "▫️"
+        lines.append(f"{tanda} {i['invoice']} • {_tgl_pendek(i['tgl'])} • {rupiah(i['total'])} ({i['umur']} hari)")
+    lines += ["", f"TOTAL: {rupiah(c['total'])} ({len(c['invoices'])} invoice)"]
+    jml_sel = sum(i["total"] for i in c["invoices"] if i["invoice"] in sel)
+    if sel:
+        lines.append(f"Dicentang: {len(sel)} invoice = {rupiah(jml_sel)}")
+    k = c["kunci"][:40]
+    rows = [[InlineKeyboardButton(("☑️ " if i["invoice"] in sel else "▫️ ") + f"{i['invoice'][-8:]} {rupiah(i['total'])}",
+                                  callback_data=f"ptx:{k}:{i['invoice']}"[:64])] for i in c["invoices"][:15]]
+    if sel:
+        rows.append([InlineKeyboardButton(f"✅ Lunas yang dicentang ({rupiah(jml_sel)})", callback_data=f"ptl:{k}:sel")])
+    rows.append([InlineKeyboardButton(f"✅ Lunas SEMUA ({rupiah(c['total'])})", callback_data=f"ptl:{k}:all")])
+    rows.append([InlineKeyboardButton("💸 Transfer sejumlah... (ketik nominal)", callback_data=f"ptn:{k}")])
+    return {"text": "\n".join(lines), "reply_markup": InlineKeyboardMarkup(rows)}
+
+
+def _piutang_cari(kunci):
+    det = _sheets().get_piutang_detail()
+    return det.get(kunci) or next((c for c in det.values() if c["kunci"].startswith(kunci)), None)
+
+
+def _alokasi_transfer(c, nominal):
+    """Transfer sekaligus: pilih invoice TERLAMA dulu yang muat penuh di nominal."""
+    pilih, sisa = [], nominal
+    for i in c["invoices"]:
+        if i["total"] <= sisa + 0.5:
+            pilih.append(i["invoice"])
+            sisa -= i["total"]
+    return pilih, sisa
 
 
 @owner_only
 async def piutang_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await _do_piutang(update)
+    await _do_piutang(update, " ".join(context.args or []))
 
 
 async def _do_utang(update):
@@ -865,6 +910,37 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["awaiting"] = None
         await _process_po_text(update, context, text)
         return
+    if awaiting == "pt_nominal":
+        import re as _re
+        t = text.lower().replace("rp", "").replace(" ", "")
+        m = _re.match(r"([\d.,]+)(jt|juta|rb|ribu|k)?", t)
+        if not m:
+            await update.effective_message.reply_text("Ketik nominalnya aja ya, mis. 5.000.000 atau 5jt. Atau /batal.")
+            return
+        angka = m.group(1)
+        if m.group(2) in ("jt", "juta"):
+            n = float(angka.replace(",", "."))  * 1_000_000
+        elif m.group(2) in ("rb", "ribu", "k"):
+            n = float(angka.replace(",", ".")) * 1_000
+        else:
+            n = float(angka.replace(".", "").replace(",", ""))
+        context.user_data["awaiting"] = None
+        c = _piutang_cari(context.user_data.pop("pt_kunci", ""))
+        if not c:
+            await update.effective_message.reply_text("Customer ini udah gak punya piutang 🎉")
+            return
+        pilih, sisa = _alokasi_transfer(c, n)
+        if not pilih:
+            await update.effective_message.reply_text(
+                f"Transfer {rupiah(n)} belum cukup buat 1 invoice pun (invoice terlama {rupiah(c['invoices'][0]['total'])}).")
+            return
+        context.user_data.setdefault("pt_sel", {})[c["kunci"]] = set(pilih)
+        msg = _piutang_detail_msg(c, set(pilih))
+        msg["text"] = (f"💸 Transfer {rupiah(n)} → cocok buat {len(pilih)} invoice terlama (☑️)."
+                       + (f"\n⚠️ Sisa {rupiah(sisa)} gak pas sama invoice manapun — cek lagi / mungkin bayar sebagian."
+                          if sisa > 0.5 else "\n✅ Pas!") + "\n\n" + msg["text"])
+        await update.effective_message.reply_text(**msg)
+        return
     if awaiting == "so_qty":
         q = _parse_angka_harga(text.strip().split()[0]) if text.strip() else None
         if not q:
@@ -924,7 +1000,7 @@ async def _route_text(update, context, text):
     elif intent == "report_pricelist":
         await _do_pricelist(update)
     elif intent == "report_piutang":
-        await _do_piutang(update)
+        await _do_piutang(update, target or "")
     elif intent == "report_utang":
         await _do_utang(update)
     elif intent == "report_kas_bulanan":
@@ -1764,6 +1840,55 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["so_code"] = code
         await update.effective_chat.send_message(
             f"Mau PO {p.get('Nama', code) if p else code} berapa {p.get('Satuan', '') if p else ''}? Ketik angkanya aja (mis. 50). /batal buat batal.")
+        return
+
+    if data.startswith(("pt:", "ptx:", "ptl:", "ptn:", "ptok:")):
+        import asyncio
+        parts = data.split(":")
+        kunci = parts[1]
+        c = await asyncio.to_thread(_piutang_cari, kunci)
+        if not c:
+            await query.edit_message_text("Customer ini udah gak punya piutang 🎉")
+            return
+        sel = context.user_data.setdefault("pt_sel", {}).setdefault(c["kunci"], set())
+        sel &= {i["invoice"] for i in c["invoices"]}
+        if parts[0] == "pt":
+            sel.clear()
+            await query.edit_message_text(**_piutang_detail_msg(c, sel))
+        elif parts[0] == "ptx":
+            inv = parts[2]
+            sel.symmetric_difference_update({inv})
+            await query.edit_message_text(**_piutang_detail_msg(c, sel))
+        elif parts[0] == "ptn":
+            context.user_data["awaiting"] = "pt_nominal"
+            context.user_data["pt_kunci"] = c["kunci"]
+            await update.effective_chat.send_message(
+                f"Berapa yang ditransfer {c['nama']}? Ketik nominalnya (mis. 5.000.000 atau 5jt). "
+                "Gua pilihin invoice terlama yang pas sama nominal itu.")
+        elif parts[0] == "ptl":
+            invs = [i["invoice"] for i in c["invoices"]] if parts[2] == "all" else [i["invoice"] for i in c["invoices"] if i["invoice"] in sel]
+            if not invs:
+                await query.answer("Centang dulu invoice-nya", show_alert=True)
+                return
+            context.user_data["pt_konfirm"] = invs
+            tot = sum(i["total"] for i in c["invoices"] if i["invoice"] in invs)
+            await query.edit_message_text(
+                f"Tandai LUNAS {len(invs)} invoice {c['nama']} = {rupiah(tot)}?\n" + "\n".join(f"• {x}" for x in invs)
+                + "\n\nOtomatis dicatat Kas Masuk per invoice.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Ya, lunas", callback_data=f"ptok:{c['kunci'][:40]}"),
+                                                    InlineKeyboardButton("❌ Batal", callback_data=f"pt:{c['kunci'][:55]}")]]))
+        elif parts[0] == "ptok":
+            invs = context.user_data.pop("pt_konfirm", None)
+            if not invs:
+                await query.edit_message_text("Udah kadaluarsa, buka /piutang lagi.")
+                return
+            hasil = await asyncio.to_thread(_sheets().lunas_banyak, invs)
+            sel.clear()
+            await query.edit_message_text(
+                f"✅ {len(hasil)} invoice {c['nama']} LUNAS, total {rupiah(sum(t for _, t in hasil))} masuk Kas:\n"
+                + "\n".join(f"• {n} {rupiah(t)}" for n, t in hasil))
+            for n, _ in hasil:
+                await _kabar_komisi(context.bot, n)
         return
 
     if data in ("bd_ok", "bd_no"):

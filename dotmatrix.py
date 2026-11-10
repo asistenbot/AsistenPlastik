@@ -451,7 +451,7 @@ def generate_surat_jalan_dotmatrix(no_surat_jalan, nama_customer, no_hp, alamat,
                 "",
                 *(_catatan_lines(catatan) + [""] if catatan and str(catatan).strip() else []),
                 "Mohon periksa jumlah dan kondisi barang saat diterima.",
-                "",
+                "", "", "",
                 "Dikirim oleh,".ljust(22) + " " * 34 + "Diterima oleh,".ljust(24),
                 "", "",
                 "(____________________)".ljust(22) + " " * 34 + "(____________________)"]

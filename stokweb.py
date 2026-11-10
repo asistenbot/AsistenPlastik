@@ -334,6 +334,46 @@ def add_stok_routes(app, sheets_getter, notify=None):
         n = await asyncio.to_thread(sheets.set_pengiriman_banyak, invs, "Owner (dashboard)")
         return web.json_response({"ok": True, "n": n})
 
+    async def terima_po(request):
+        """Owner nerima barang PO langsung dari dashboard -> langsung masuk stok (tanpa persetujuan)."""
+        if not await _link(request, ("@owner",)):
+            return web.json_response({"ok": False}, status=404)
+        body = await request.json()
+        no_po = str(body.get("po", "")).strip()[:40]
+        sheets = sheets_getter()
+        po = next((p for p in await asyncio.to_thread(sheets.get_po_untuk_terima, True, 200) if p["po"] == no_po), None)
+        if not po:
+            return web.json_response({"ok": False, "error": "PO gak ketemu / udah lengkap"})
+        if po.get("status_terima") == "Menunggu":
+            return web.json_response({"ok": False, "error": "PO ini udah dikirim staff, tinggal disetujui di atas (Menunggu persetujuan)."})
+        produk = {str(p["code"]).upper(): p for p in await asyncio.to_thread(_stok_items, sheets)}
+        ents, peta = [], {}
+        for e in (body.get("entries") or [])[:200]:
+            p = produk.get(str(e.get("code", "")).strip().upper())
+            try:
+                qty = float(str(e.get("qty", "")).replace(",", "."))
+            except ValueError:
+                continue
+            if p is None or qty <= 0 or qty > 1_000_000:
+                continue
+            if e.get("unit") == "bal":
+                if p["isi_bal"] <= 0:
+                    continue
+                qty *= p["isi_bal"]
+            ents.append({"item_code": p["code"], "nama": p["nama"], "qty": qty, "satuan": p["satuan"]})
+            if e.get("nama"):
+                peta[str(e["nama"])[:120]] = p["code"]
+        if not ents:
+            return web.json_response({"ok": False, "error": "Isi dulu jumlah barang yang datang"})
+        catatan = str(body.get("catatan", ""))[:120]
+
+        def _jalan():
+            batch = sheets.add_pengajuan("Owner", "Masuk", ents, no_po)
+            sheets.add_penerimaan(no_po, batch, "Owner", catatan, peta)
+            return sheets.decide_pengajuan(batch, True, "owner (dashboard)")
+        n = await asyncio.to_thread(_jalan)
+        return web.json_response({"ok": bool(n), "n": len(ents)})
+
     async def tutup_po(request):
         if not await _link(request, ("@owner",)):
             return web.json_response({"ok": False}, status=404)
@@ -459,6 +499,7 @@ def add_stok_routes(app, sheets_getter, notify=None):
     app.router.add_post("/dashboard/{token}/jadihitung", jadihitung)
     app.router.add_post("/dashboard/{token}/popermintaan", po_permintaan)
     app.router.add_post("/dashboard/{token}/tutuppo", tutup_po)
+    app.router.add_post("/dashboard/{token}/terimapo", terima_po)
     app.router.add_post("/dashboard/{token}/bayarkomisi", bayar_komisi)
     app.router.add_post("/dashboard/{token}/kirim", tandai_kirim)
     app.router.add_get("/dashboard/{token}/struk/{inv}", struk)

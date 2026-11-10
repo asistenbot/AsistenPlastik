@@ -184,7 +184,17 @@ def add_stok_routes(app, sheets_getter, notify=None):
         for r in rows:
             b = batches.setdefault(r["Batch"], {"batch": r["Batch"], "staff": r.get("Staff", ""), "jenis": r.get("Jenis", ""),
                                                 "waktu": r.get("Waktu", ""), "ref": r.get("Ref", ""), "items": []})
-            b["items"].append({"nama": r.get("Nama", ""), "qty": r.get("Qty", ""), "satuan": r.get("Satuan", "")})
+            b["items"].append({"nama": r.get("Nama", ""), "qty": r.get("Qty", ""), "satuan": r.get("Satuan", ""),
+                               "code": str(r.get("Item_Code", "")).strip().upper()})
+        if batches:
+            try:
+                stok_now = {str(i["code"]).upper(): i for i in await asyncio.to_thread(sheets.get_stok_all)}
+                for b in batches.values():
+                    for it in b["items"]:
+                        s_ = stok_now.get(it["code"])
+                        it["sekarang"] = s_["stok"] if s_ else None
+            except Exception:
+                logger.exception("gagal ambil stok sekarang buat pending")
         for b in batches.values():
             if str(b["ref"]).upper().startswith(config.PO_PREFIX):
                 diterima = {}

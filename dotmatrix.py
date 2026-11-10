@@ -135,12 +135,12 @@ def _party_lines(nama, no_hp, alamat, metode, no_po, tgl_kirim):
 
 
 def _build(doc_title, no_dok, ref_line, party, widths, aligns, head, item_groups,
-           footer_fn, footer_len):
+           footer_fn, footer_len, ref_right=""):
     """Balikin list halaman. Tiap halaman = (baris_png, baris_txt, judul_besar).
     baris_png: judul besar dikosongin (digambar terpisah, dobel ukuran);
     baris_txt: judul ditulis biasa di baris pertama. Tanpa kotak/bingkai --
     cuma garis pemisah horizontal, isinya full 80 kolom."""
-    header_len = 3 + 1 + len(party) + 3      # judul(3) + garis + pihak + garis/kepala/garis tabel
+    header_len = 3 + (1 if ref_right else 0) + 1 + len(party) + 3   # judul(3[+1 tgl]) + garis + pihak + tabel
     last_cap = PAGE_LINES - header_len - footer_len
     mid_cap = PAGE_LINES - header_len - 2    # garis tutup + "bersambung"
 
@@ -170,7 +170,8 @@ def _build(doc_title, no_dok, ref_line, party, widths, aligns, head, item_groups
             title_txt = doc_title if variant == "txt" else ""
             L = [name.ljust(COLS - len(title_txt)) + title_txt,
                  "No  : " + no_dok,
-                 ref_line.ljust(COLS - len(hal)) + hal,
+                 *(([ref_line, (ref_right + ("   " + hal if hal else "")).rjust(COLS)]) if ref_right
+                   else [ref_line.ljust(COLS - len(hal)) + hal]),
                  _hl("=")]
             L.extend(party)
             L.append(_hl("-"))
@@ -445,20 +446,29 @@ def generate_surat_jalan_dotmatrix(no_surat_jalan, nama_customer, no_hp, alamat,
     groups = _item_groups(items, widths, aligns, widths[1], "sj")
     n_items = len(items)
 
+    gap = {"mohon": 3, "ttd": 5}
+
     def footer(widths_, _n):
         return [_hl("-"),
                 f"Total jenis barang : {n_items}",
                 "",
                 *(_catatan_lines(catatan) + [""] if catatan and str(catatan).strip() else []),
                 "Mohon periksa jumlah dan kondisi barang saat diterima.",
-                "", "", "",
+                *([""] * gap["mohon"]),
                 "Dikirim oleh,".ljust(22) + " " * 34 + "Diterima oleh,".ljust(24),
-                "", "", "", "", "",
+                *([""] * gap["ttd"]),
                 "(____________________)".ljust(22) + " " * 34 + "(____________________)"]
 
     tgl = _tgl_label(tanggal)
-    ref = (f"Ref : {no_invoice_ref}   " if no_invoice_ref else "") + f"Tgl : {tgl}"
+    ref = f"Ref : {no_invoice_ref}" if no_invoice_ref else ""
     party = _party_lines(nama_customer, no_hp, alamat, metode, no_po_customer, tanggal_kirim)
+    # jarak lega kalau muat 1 halaman; kalau barangnya banyak, jarak dipadetin dulu sebelum pindah halaman
+    header_len = 4 + 1 + len(party) + 3
+    n_baris = sum(len(g) for g in groups)
+    for gm, gt in ((3, 5), (2, 4), (1, 3), (1, 2)):
+        gap.update(mohon=gm, ttd=gt)
+        if header_len + n_baris + len(footer(widths, 0)) <= PAGE_LINES:
+            break
     pages = _build("SURAT JALAN", no_surat_jalan, ref, party, widths, aligns, head,
-                   groups, footer, len(footer(widths, 0)))
+                   groups, footer, len(footer(widths, 0)), ref_right=f"Tgl : {tgl}")
     return _finish(pages)

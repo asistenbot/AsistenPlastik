@@ -57,7 +57,9 @@ def _per_customer(inv, today):
         if o["customer"].isupper() or len(o["customer"]) > len(c["nama"]):
             c["nama"] = o["customer"]
         c["invoices"].append({"invoice": o["invoice"], "tgl": o["tgl"], "total": o["total"], "status": o["status"],
-                              "bayar": o["bayar"], "items": [f"{it['nama']} x{it['qty']:g} {it['satuan']}" for it in o["items"]][:6]})
+                              "bayar": o["bayar"],
+                              "items": [{"nama": it["nama"], "qty": it["qty"], "satuan": it["satuan"], "sub": it["subtotal"]}
+                                        for it in o["items"]]})
     for c in by.values():
         c["invoices"].sort(key=lambda i: (i["tgl"], i["invoice"]), reverse=True)
     return sorted(by.values(), key=lambda c: -c["total"])
@@ -66,13 +68,14 @@ def _per_customer(inv, today):
 def hitung_laporan(sheets, bulan=None):
     """bulan: 'YYYY-MM' (default bulan ini WIB). Balikin dict siap di-JSON."""
     today = _wib_today()
+    semua = str(bulan or "").lower() == "semua"
     try:
         y, m = [int(x) for x in str(bulan).split("-")]
         if not 1 <= m <= 12:
             raise ValueError
     except (ValueError, AttributeError):
         y, m = today.year, today.month
-    pref = f"{y:04d}-{m:02d}"
+    pref = "" if semua else f"{y:04d}-{m:02d}"
 
     orders = sheets.get_all_orders()
     pos = sheets.get_all_pos()
@@ -153,8 +156,14 @@ def hitung_laporan(sheets, bulan=None):
             qty_prod[it["nama"]] = (qty_prod.get(it["nama"], ("", 0))[0] or it["satuan"],
                                     qty_prod.get(it["nama"], ("", 0))[1] + it["qty"])
             per_kat[it["kategori"]] = per_kat.get(it["kategori"], 0) + it["subtotal"]
-    jml_hari = (datetime.date(*_geser_bulan((y, m), 1), 1) - datetime.date(y, m, 1)).days
-    seri_harian = [{"tgl": f"{pref}-{d:02d}", "total": harian.get(f"{pref}-{d:02d}", 0)} for d in range(1, jml_hari + 1)]
+    if semua:   # semua waktu: grafiknya per bulan
+        per_bln = {}
+        for o in bln:
+            per_bln[o["tgl"][:7]] = per_bln.get(o["tgl"][:7], 0) + o["total"]
+        seri_harian = [{"tgl": k, "total": v, "label": f"{BULAN[int(k[5:7])]} {k[2:4]}"} for k, v in sorted(per_bln.items())]
+    else:
+        jml_hari = (datetime.date(*_geser_bulan((y, m), 1), 1) - datetime.date(y, m, 1)).days
+        seri_harian = [{"tgl": f"{pref}-{d:02d}", "total": harian.get(f"{pref}-{d:02d}", 0)} for d in range(1, jml_hari + 1)]
 
     # ---- tren 6 bulan (omzet, kas masuk/keluar) ----
     tren = []
@@ -167,8 +176,20 @@ def hitung_laporan(sheets, bulan=None):
         tren.append({"bulan": f"{BULAN[mm]} {str(yy)[2:]}", "omzet": om, "kas_masuk": km, "kas_keluar": kk})
 
     # ---- kas bulan terpilih ----
-    lap = sheets.get_laporan_bulanan(y, m)
     kas_bln = [r for r in kas if str(r.get("Tanggal", "")).startswith(pref)]
+    if semua:
+        lap = {"masuk_by_kategori": {}, "keluar_by_kategori": {}, "total_masuk": 0.0, "total_keluar": 0.0}
+        for r in kas_bln:
+            j, kat = _f(r.get("Jumlah")), str(r.get("Kategori", "")) or "Lainnya"
+            if r.get("Jenis") == "Masuk":
+                lap["masuk_by_kategori"][kat] = lap["masuk_by_kategori"].get(kat, 0) + j
+                lap["total_masuk"] += j
+            elif r.get("Jenis") == "Keluar":
+                lap["keluar_by_kategori"][kat] = lap["keluar_by_kategori"].get(kat, 0) + j
+                lap["total_keluar"] += j
+        lap["laba"] = lap["total_masuk"] - lap["total_keluar"]
+    else:
+        lap = sheets.get_laporan_bulanan(y, m)
     kas_list = [{"tgl": str(r.get("Tanggal", "")), "jenis": r.get("Jenis", ""), "kategori": r.get("Kategori", ""),
                  "jumlah": _f(r.get("Jumlah")), "ket": str(r.get("Keterangan", ""))}
                 for r in sorted(kas_bln, key=lambda r: str(r.get("Tanggal", "")), reverse=True)][:60]
@@ -265,7 +286,7 @@ def hitung_laporan(sheets, bulan=None):
         "stok_menipis": sum(1 for s in stok if s.get("status") == "menipis"),
     }
     return {
-        "ok": True, "bulan": pref, "bulan_label": f"{BULAN[m]} {y}", "hari_ini": today.strftime("%Y-%m-%d"),
+        "ok": True, "bulan": "semua" if semua else pref, "bulan_label": "Semua waktu" if semua else f"{BULAN[m]} {y}", "hari_ini": today.strftime("%Y-%m-%d"),
         "ringkas": ringkas, "tren": tren, "harian": seri_harian,
         "top_customer": [{"nama": k, "total": v} for k, v in _top(per_cust)],
         "top_produk": [{"nama": k, "total": v, "qty": qty_prod[k][1], "satuan": qty_prod[k][0]} for k, v in _top(per_prod)],

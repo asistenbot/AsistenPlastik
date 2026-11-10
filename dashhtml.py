@@ -50,8 +50,9 @@ table{font-size:10pt}th{background:#eee!important;-webkit-print-color-adjust:exa
 td input{border:0!important;background:none!important;width:auto!important;text-align:right}
 .hide-s{display:table-cell!important}
 }
+details summary::-webkit-details-marker{display:none}details[open] summary .arw{transform:rotate(180deg)}
 </style><script src="/thermal.js"></script></head><body>
-<header><h1>📊 __BIZ__</h1><button class="btn k" id="pr1">🖨️ Cetak halaman ini</button><button class="btn k" id="prAll">🖨️ Cetak semua laporan</button><input type="month" id="bln" placeholder="2026-10" pattern="[0-9]{4}-[0-9]{2}"></header>
+<header><h1>📊 __BIZ__</h1><button class="btn k" id="pr1">🖨️ Cetak halaman ini</button><button class="btn k" id="prAll">🖨️ Cetak semua laporan</button><input type="month" id="bln" placeholder="2026-10" pattern="[0-9]{4}-[0-9]{2}"><button class="btn k" id="semuaBln">Semua bulan</button></header>
 <div id="phead"><h1>__BIZ__</h1><div id="phinfo"></div></div>
 <div class="tabs" id="tabs"></div>
 <main>
@@ -110,7 +111,7 @@ h+='<h2>🚚 Invoice belum dikirim</h2>'+(L.belum_kirim_list.length?'<div style=
 document.getElementById('p_ringkasan').innerHTML=h}
 
 function renderPenjualan(){const r=L.ringkas;let h='<div class="cards">'+card('Omzet '+esc(L.bulan_label),rps(r.omzet),'blu')+card('Jumlah invoice',r.jml_invoice)+card('Rata-rata / invoice',rps(r.rata_invoice))+card('Estimasi laba kotor',rps(r.laba_kotor),'grn',r.laba_lengkap?'':'harga beli belum lengkap')+'</div>';
-h+='<h2>Omzet per hari</h2><div class="box">'+vbars(L.harian,'total',a=>(+a.tgl.slice(8,10))%5==1||a.tgl.slice(8,10)=='31'?+a.tgl.slice(8,10):'')+'</div>';
+h+=L.bulan=='semua'?'<h2>Omzet per bulan</h2><div class="box">'+vbars(L.harian,'total',a=>esc(a.label||a.tgl))+'</div>':'<h2>Omzet per hari</h2><div class="box">'+vbars(L.harian,'total',a=>(+a.tgl.slice(8,10))%5==1||a.tgl.slice(8,10)=='31'?+a.tgl.slice(8,10):'')+'</div>';
 h+='<h2>Customer teratas</h2><div class="box">'+hbars(L.top_customer)+'</div>';
 h+='<h2>Produk terlaris (rupiah)</h2><div class="box">'+hbars(L.top_produk.map(p=>({nama:p.nama+' ('+fmt(p.qty)+' '+p.satuan+')',total:p.total})))+'</div>';
 h+='<h2>Per kategori</h2><div class="box">'+hbars(L.per_kategori)+'</div>';
@@ -143,22 +144,25 @@ h+='<h2>Kas masuk per kategori</h2><div class="box">'+hbars(L.kas_masuk_kat)+'</
 h+=L.kas_list.length?'<table><thead><tr><th>Tanggal</th><th>Keterangan</th><th class="n">Jumlah</th></tr></thead><tbody>'+L.kas_list.map(k=>'<tr><td>'+dmy(k.tgl)+'</td><td>'+esc(k.kategori)+'<br><small style="color:#888">'+esc(k.ket)+'</small></td><td class="n" style="color:'+(k.jenis=='Masuk'?'#14633a':'#c0281c')+'">'+(k.jenis=='Masuk'?'+':'-')+rp(k.jumlah)+'</td></tr>').join('')+'</tbody></table>':'<div class="empty">Belum ada transaksi kas bulan ini.</div>';
 document.getElementById('p_kas').innerHTML=h}
 
-let CSEL=null;
+let CPER='semua';
 function renderCustomer(){const C=L.customers||[];let h='';
 h+='<h2>⚠️ Ditandai LUNAS 7 hari terakhir</h2><div class="mut" style="margin-bottom:4px">Cek di sini kalau ada yang kepencet lunas. Klik ↩️ buat balikin jadi belum lunas (Kas Masuk-nya ikut dihapus).</div>'+
 ((L.lunas_baru||[]).length?'<table><thead><tr><th>Invoice</th><th class="n">Total</th></tr></thead><tbody>'+L.lunas_baru.map(o=>'<tr><td><b>'+esc(o.customer)+'</b><br><small style="color:#888">'+esc(o.invoice)+' • invoice '+dmy(o.tgl)+' • <b>lunas '+dmy(o.bayar)+'</b></small><div style="margin-top:4px"><button class="btn s r" data-bl="'+esc(o.invoice)+'" data-n="'+esc(o.customer)+'" data-j="'+o.total+'">↩️ Batal lunas</button></div></td><td class="n">'+rp(o.total)+'</td></tr>').join('')+'</tbody></table>':'<div class="empty">Gak ada.</div>');
-h+='<h2>👥 Penjualan per customer (semua waktu)</h2><input type="search" id="ccari" placeholder="cari customer..." value="'+esc(CSEL||'')+'">';
-h+='<table><thead><tr><th>Customer</th><th class="n">Total belanja</th><th class="n hide-s">Sudah bayar</th><th class="n">Belum bayar</th></tr></thead><tbody id="ctb"></tbody></table><div id="cdet"></div>';
+const per=CPER=='semua'||L.bulan=='semua'?'':L.bulan;
+h+='<h2>👥 Per customer</h2><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px"><button class="btn s '+(CPER=='semua'?'':'k')+'" data-cper="semua">Semua waktu</button>'+(L.bulan!='semua'?'<button class="btn s '+(CPER=='bulan'?'':'k')+'" data-cper="bulan">'+esc(L.bulan_label)+'</button>':'')+'</div><input type="search" id="ccari" placeholder="cari customer..."><div id="clist"></div>';
 document.getElementById('p_customer').innerHTML=h;
-const draw=()=>{const q=(document.getElementById('ccari').value||'').toLowerCase();document.getElementById('ctb').innerHTML=C.filter(c=>c.nama.toLowerCase().includes(q)).map((c,i)=>'<tr style="cursor:pointer" data-ci="'+C.indexOf(c)+'"><td><b>'+esc(c.nama)+'</b><br><small style="color:#888">'+c.n+' invoice • terakhir '+dmy(c.terakhir)+'</small></td><td class="n">'+rp(c.total)+'</td><td class="n hide-s" style="color:#14633a">'+rp(c.lunas)+'</td><td class="n" style="color:'+(c.belum>0?'#c0281c':'#14633a')+'">'+rp(c.belum)+'</td></tr>').join('')};
-draw();document.getElementById('ccari').oninput=draw;
-document.getElementById('ctb').onclick=e=>{const tr=e.target.closest('tr');if(!tr)return;const c=C[tr.dataset.ci];
-document.getElementById('cdet').innerHTML='<h2>📄 '+esc(c.nama)+'</h2><div class="cards">'+card('Total belanja',rps(c.total),'blu',c.n+' invoice')+card('Sudah bayar',rps(c.lunas),'grn')+card('Belum bayar',rps(c.belum),c.belum>0?'red':'grn')+'</div><table><thead><tr><th>Invoice</th><th class="n">Total</th><th>Status</th></tr></thead><tbody>'+
-c.invoices.map(o=>'<tr><td>'+esc(o.invoice)+'<br><small style="color:#888">'+dmy(o.tgl)+(o.items.length?' • '+esc(o.items.join(', ')):'')+'</small><div style="margin-top:4px">'+dok(o.invoice)+(o.status=='Lunas'?' <button class="btn s r" data-bl="'+esc(o.invoice)+'" data-n="'+esc(c.nama)+'" data-j="'+o.total+'">↩️ Batal lunas</button>':' <button class="btn s" data-lunas="'+esc(o.invoice)+'" data-n="'+esc(c.nama)+'" data-j="'+o.total+'">✅ Lunas</button>')+'</div></td><td class="n">'+rp(o.total)+'</td><td>'+(o.status=='Lunas'?'<span class="pill p-sudah">Lunas '+dmy(o.bayar)+'</span>':'<span class="pill p-belum">Belum</span>')+'</td></tr>').join('')+'</tbody></table>';
-document.getElementById('cdet').scrollIntoView({behavior:'smooth'})}}
-async function loadLap(){const bl=document.getElementById('bln').value;try{const r=await fetch(B+'/laporan?bulan='+encodeURIComponent(bl));const j=await r.json();if(!j.ok)throw 0;L=j;if(!bl)document.getElementById('bln').value=j.bulan;
+const data=C.map(c=>{const inv=c.invoices.filter(o=>!per||o.tgl.startsWith(per));const tot=inv.reduce((a,o)=>a+o.total,0),bel=inv.filter(o=>o.status!='Lunas').reduce((a,o)=>a+o.total,0);
+const brg={};inv.forEach(o=>o.items.forEach(it=>{const k=it.nama+'|'+it.satuan;(brg[k]=brg[k]||{nama:it.nama,sat:it.satuan,qty:0,sub:0});brg[k].qty+=it.qty;brg[k].sub+=it.sub}));
+return {nama:c.nama,inv,tot,bel,brg:Object.values(brg).sort((a,b)=>b.sub-a.sub)}}).filter(c=>c.inv.length).sort((a,b)=>b.tot-a.tot);
+const draw=()=>{const q=(document.getElementById('ccari').value||'').toLowerCase();
+document.getElementById('clist').innerHTML=data.filter(c=>c.nama.toLowerCase().includes(q)).map(c=>'<details class="box" style="padding:0"><summary style="padding:10px 12px;cursor:pointer;list-style:none;display:flex;gap:8px;align-items:center"><span style="flex:1"><b>'+esc(c.nama)+'</b><br><small style="color:#888">'+c.inv.length+' invoice • '+c.inv.filter(o=>o.status=='Lunas').length+' lunas</small></span><span style="text-align:right"><b>'+rp(c.tot)+'</b><br>'+(c.bel>0?'<span class="pill p-belum">belum '+rps(c.bel)+'</span>':'<span class="pill p-sudah">lunas semua</span>')+'</span><span class="arw" style="color:#888">▾</span></summary>'+
+'<div style="padding:0 12px 12px"><div class="cards">'+card('Total belanja',rps(c.tot),'blu',c.inv.length+' invoice')+card('Sudah bayar',rps(c.tot-c.bel),'grn')+card('Belum bayar',rps(c.bel),c.bel>0?'red':'grn')+'</div>'+
+'<div style="font-weight:600;margin:8px 0 4px">📦 Barang yang dipesan</div>'+c.brg.map(b=>'<div class="hb"><div class="l" title="'+esc(b.nama)+'">'+esc(b.nama)+'</div><div class="v" style="min-width:auto">'+fmt(b.qty)+' '+esc(b.sat)+'</div><div class="v">'+rp(b.sub)+'</div></div>').join('')+
+'<div style="font-weight:600;margin:10px 0 4px">🧾 Invoice</div>'+c.inv.map(o=>'<div style="padding:6px 0;border-bottom:1px solid var(--ln)"><div style="display:flex;gap:6px;align-items:center"><span>'+(o.status=='Lunas'?'✅':'⏳')+'</span><span style="flex:1"><b>'+esc(o.invoice)+'</b> <small style="color:#888">'+dmy(o.tgl)+'</small></span><b>'+rp(o.total)+'</b></div><div class="mut">'+esc(o.items.map(it=>it.nama+' x'+fmt(it.qty)+' '+it.satuan).join(', '))+'</div><div style="margin-top:4px">'+(o.status=='Lunas'?'<span class="pill p-sudah">Lunas '+dmy(o.bayar)+'</span> <button class="btn s r" data-bl="'+esc(o.invoice)+'" data-n="'+esc(c.nama)+'" data-j="'+o.total+'">↩️ Batal lunas</button>':'<span class="pill p-belum">Belum lunas</span> <button class="btn s" data-lunas="'+esc(o.invoice)+'" data-n="'+esc(c.nama)+'" data-j="'+o.total+'">✅ Lunas</button>')+' '+dok(o.invoice)+'</div></div>').join('')+'</div></details>').join('')||'<div class="empty">Gak ada data.</div>'};
+draw();document.getElementById('ccari').oninput=draw}
+let MODE='';async function loadLap(){const bl=MODE||document.getElementById('bln').value;document.getElementById('semuaBln').style.background=MODE?'#fff':'';document.getElementById('semuaBln').style.color=MODE?'var(--g)':'';try{const r=await fetch(B+'/laporan?bulan='+encodeURIComponent(bl));const j=await r.json();if(!j.ok)throw 0;L=j;if(!bl&&j.bulan!='semua')document.getElementById('bln').value=j.bulan;
 renderRingkasan();renderPenjualan();renderTagihan();renderUtang();renderKas();renderCustomer()}catch(e){document.getElementById('p_ringkasan').innerHTML='<div class="box">Gagal ambil laporan. Coba refresh sebentar lagi (Google Sheets lagi sibuk).</div>'}}
-document.getElementById('bln').onchange=loadLap;
+document.getElementById('bln').onchange=()=>{MODE='';loadLap()};document.getElementById('semuaBln').onclick=()=>{MODE=MODE?'':'semua';loadLap()};
 function cetak(all){const nm=(TABS.find(t=>t[0]==TAB)||['',''])[1].replace(/^\S+\s/,'');
 document.getElementById('phinfo').textContent=(all?'Laporan lengkap':nm)+' — '+(L?L.bulan_label:'')+' • dicetak '+new Date().toLocaleString('id-ID');
 document.body.classList.toggle('printall',!!all);setTimeout(()=>{window.print();setTimeout(()=>document.body.classList.remove('printall'),500)},100)}
@@ -205,6 +209,7 @@ m.invoices.map(o=>'<div>• '+esc(o.invoice)+' <small style="color:#888">'+dmy(o
 (m.sudah.length&&m.belum.length?'<div class="mut">↳ sebagian udah lunas duluan — cek, mungkin ada yang kepencet</div>':m.sudah.length?'<div class="mut">↳ semua udah ditandai lunas</div>':'')+
 (m.belum.length?'<div style="margin-top:6px"><button class="btn s" data-tfl="'+esc(m.belum.join(','))+'">✅ Lunasin '+m.belum.length+' bon yang belum</button></div>':'')+'</div>').join('')+(H.length>1?'<div class="mut">Ada beberapa kemungkinan — pilih yang sesuai bukti transfer.</div>':'');return}
 if(b.dataset.tfl){const v=b.dataset.tfl.split(',');if(!confirm('Tandai LUNAS: '+v.join(', ')+'?'))return;b.disabled=true;const r=await (await fetch(B+'/lunasbanyak',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({invoices:v})})).json();alert(r.ok?'✅ '+r.n+' bon lunas ('+rp(r.total)+').':'Gagal');loadLap();return}
+if(b.dataset.cper){CPER=b.dataset.cper;renderCustomer();return}
 if(b.dataset.km){if(!confirm('Komisi '+b.dataset.km+' ('+rp(+b.dataset.j)+') sudah dibayar? Otomatis dicatat Kas Keluar.'))return;b.disabled=true;const r=await (await fetch(B+'/bayarkomisi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({invoice:b.dataset.km})})).json();if(!r.ok)alert(r.error||'Gagal');loadLap();return}
 if(b.dataset.tutup){if(!confirm('Tutup '+b.dataset.tutup+'? Sisa barang dianggap gak dikirim & PO hilang dari daftar staff.'))return;b.disabled=true;await fetch(B+'/tutuppo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({po:b.dataset.tutup})});loadPend();return}
 if(b.dataset.th){cetakThermal(B+'/struk/'+encodeURIComponent(b.dataset.th),b);return}

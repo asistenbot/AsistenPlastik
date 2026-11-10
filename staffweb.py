@@ -79,6 +79,7 @@ input::placeholder,textarea::placeholder{color:#A3AABA}input:focus,select:focus,
 .chip.on{background:var(--blu);color:#fff;border-color:var(--blu)}.chip small{opacity:.75}
 .lnk{background:none;border:0;color:var(--blu);padding:4px 0;font:inherit;font-size:13px;text-decoration:underline;cursor:pointer}
 a{color:var(--blu)}
+.oi{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px dashed var(--ln)}.oi:last-child{border-bottom:0}.oi strong{white-space:nowrap}
 .hide{display:none}.err{color:var(--red);font-size:14px;min-height:20px}
 @media(prefers-reduced-motion:reduce){main{animation:none}}
 </style><script src="/thermal.js"></script></head><body>
@@ -86,7 +87,7 @@ a{color:var(--blu)}
 <script>
 const $=id=>document.getElementById(id);const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=n=>(Math.round(n*100)/100).toLocaleString('id-ID');
-let ME=null,D=null,tab='po';const vals={};let poSel=null,poV={},poOpen={};
+let ME=null,D=null,tab='po',pf='belum';const vals={};let poSel=null,poV={},poOpen={};
 async function api(path,body){const r=await fetch('/staff/api/'+path,body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{});
 let j={};try{j=await r.json()}catch(_){}return{status:r.status,...j}}
 function loginView(msg){$('app').innerHTML='<div class="login"><h2>📦 Panel Gudang</h2><p class="mu">__BIZ__</p><label>ID</label><input id="u" autocapitalize="none" autocomplete="username"><label>Password</label><input id="p" type="password" autocomplete="current-password"><div class="err" id="e">'+esc(msg||'')+'</div><button class="btn" id="b">Masuk</button></div>';
@@ -128,9 +129,14 @@ $('lst').addEventListener('change',e=>{const i=e.target.dataset.s;if(i!==undefin
 $('go').onclick=async()=>{if(!confirm('Kirim hasil cek PO '+p.po+' ke owner?'))return;const entries=p.items.map((it,i)=>({code:poV[i].code,qty:parseFloat(String(poV[i].q).replace(',','.')),unit:unitFor(it,poV[i].code),nama:it.nama}));
 $('go').disabled=true;const r=await api('terimapo',{po:p.po,catatan:$('cat').value,entries});
 if(r.ok){alert('✅ Terkirim ke owner, nunggu disetujui');poSel=null;tab='riwayat';await boot()}else{alert(r.error||'Gagal');$('go').disabled=false}};return}
-if(tab=='pesanan'){let h='<div class="info">Pesanan customer yang harus disiapkan. Setelah barang keluar gudang, tekan <b>Sudah dikirim</b>.</div>';
-D.orders.forEach(o=>{h+='<div class="card"><b>'+esc(o.customer)+' <span class="badge '+(o.dikirim?'Dikirim':'Menunggu')+'">'+(o.dikirim?'Dikirim':'Belum dikirim')+'</span></b><small>'+esc(o.invoice)+' • '+esc(o.tgl)+(o.kirim?' • kirim '+esc(o.kirim):'')+' • '+esc(o.metode)+'</small><div style="margin:6px 0">'+o.items.map(i=>'• '+esc(i.nama)+' — <b>'+esc(i.qty)+' '+esc(i.satuan)+'</b>').join('<br>')+'</div>'+(o.alamat?'<small>📍 '+esc(o.alamat)+'</small><br>':'')+(o.dikirim?'<small>oleh '+esc(o.dikirim_oleh)+' • '+esc(o.dikirim_waktu)+'</small>':'<button class="btn sm" data-k="'+esc(o.invoice)+'">✅ Sudah dikirim</button>')+' <a class="btn sm" style="text-decoration:none;display:inline-block;background:var(--sf2);color:var(--tx)" target="_blank" rel="noopener" href="/staff/api/dok/'+encodeURIComponent(o.invoice)+'">🖨️ Surat Jalan</a> <a class="btn sm" style="text-decoration:none;display:inline-block;background:var(--sf2);color:var(--tx)" href="/staff/api/doktxt/'+encodeURIComponent(o.invoice)+'">📝 SJ teks</a> <button class="btn sm" style="background:var(--sf2);color:var(--tx);box-shadow:inset 0 0 0 1px var(--ln2)" data-th="'+esc(o.invoice)+'">📠 Thermal 58mm</button></div>'});
-m.innerHTML=(h||'<p>Belum ada pesanan.</p>')+'<p class="mu" style="text-align:center">📠 Thermal: pakai Chrome di Android, printer nyala. <button class="lnk" id="gp">Ganti printer</button></p>';$('gp').onclick=()=>window.gantiPrinterThermal&&gantiPrinterThermal();m.querySelectorAll('[data-th]').forEach(b=>b.onclick=()=>cetakThermal('/staff/api/struk/'+encodeURIComponent(b.dataset.th),b));m.querySelectorAll('[data-k]').forEach(b=>b.onclick=async()=>{if(!confirm('Barang untuk '+b.dataset.k+' sudah keluar & dikirim?'))return;b.disabled=true;const r=await api('kirim',{invoice:b.dataset.k});if(r.ok)boot();else alert(r.error||'Gagal')});return}
+if(tab=='pesanan'){const BL=D.orders.filter(o=>!o.dikirim),SD=D.orders.filter(o=>o.dikirim);
+const tk=o=>{const k=String(o.kirim||'');return /^\\d{4}-\\d{2}-\\d{2}/.test(k)?k.slice(0,10):(o.tgl||'')};
+BL.sort((a,b)=>tk(a)<tk(b)?-1:tk(a)>tk(b)?1:(a.invoice<b.invoice?-1:1));
+const LS=pf=='belum'?BL:pf=='sudah'?SD:BL.concat(SD);
+let h='<div class="chips" style="margin:2px 0 10px"><button class="chip'+(pf=='belum'?' on':'')+'" data-pf="belum">🚚 Belum dikirim ('+BL.length+')</button><button class="chip'+(pf=='sudah'?' on':'')+'" data-pf="sudah">✅ Sudah dikirim</button><button class="chip'+(pf=='semua'?' on':'')+'" data-pf="semua">Semua</button></div>'+
+(pf=='belum'?(BL.length?'<div class="info">Siapin barangnya, abis keluar gudang pencet <b>Sudah dikirim</b>. Urutan: tanggal kirim paling awal di atas.</div>':'<div class="card" style="text-align:center;padding:26px"><b>🎉 Semua pesanan udah dikirim</b><small>Gak ada yang perlu disiapin sekarang.</small></div>'):'');
+LS.forEach(o=>{h+='<div class="card"><b>'+esc(o.customer)+' <span class="badge '+(o.dikirim?'Dikirim':'Menunggu')+'">'+(o.dikirim?'Dikirim':'Belum dikirim')+'</span></b><small>'+esc(o.invoice)+' • '+esc(o.tgl)+(o.kirim?' • kirim '+esc(o.kirim):'')+' • '+esc(o.metode)+'</small><div style="margin:6px 0">'+o.items.map(i=>'<div class="oi"><span>'+esc(i.nama)+'</span><strong>'+esc(i.qty)+' '+esc(i.satuan)+'</strong></div>').join('')+'</div>'+(o.alamat?'<small>📍 '+esc(o.alamat)+'</small><br>':'')+(o.dikirim?'<small>oleh '+esc(o.dikirim_oleh)+' • '+esc(o.dikirim_waktu)+'</small>':'<button class="btn sm" data-k="'+esc(o.invoice)+'">✅ Sudah dikirim</button>')+' <a class="btn sm" style="text-decoration:none;display:inline-block;background:var(--sf2);color:var(--tx)" target="_blank" rel="noopener" href="/staff/api/dok/'+encodeURIComponent(o.invoice)+'">🖨️ Surat Jalan</a> <a class="btn sm" style="text-decoration:none;display:inline-block;background:var(--sf2);color:var(--tx)" href="/staff/api/doktxt/'+encodeURIComponent(o.invoice)+'">📝 SJ teks</a> <button class="btn sm" style="background:var(--sf2);color:var(--tx);box-shadow:inset 0 0 0 1px var(--ln2)" data-th="'+esc(o.invoice)+'">📠 Thermal 58mm</button></div>'});
+m.innerHTML=h+(pf!='belum'&&!LS.length?'<p class="mu">Belum ada.</p>':'')+'<p class="mu" style="text-align:center">📠 Thermal: pakai Chrome di Android, printer nyala. <button class="lnk" id="gp">Ganti printer</button></p>';m.querySelectorAll('[data-pf]').forEach(b=>b.onclick=()=>{pf=b.dataset.pf;view()});$('gp').onclick=()=>window.gantiPrinterThermal&&gantiPrinterThermal();m.querySelectorAll('[data-th]').forEach(b=>b.onclick=()=>cetakThermal('/staff/api/struk/'+encodeURIComponent(b.dataset.th),b));m.querySelectorAll('[data-k]').forEach(b=>b.onclick=async()=>{if(!confirm('Barang untuk '+b.dataset.k+' sudah keluar & dikirim?'))return;b.disabled=true;const r=await api('kirim',{invoice:b.dataset.k});if(r.ok)boot();else alert(r.error||'Gagal')});return}
 if(tab=='riwayat'){let h='<div class="info">Pengajuan stok kamu. <b>Menunggu</b> = belum disetujui owner.</div>';
 const by={};D.pengajuan.forEach(p=>{(by[p.Batch]=by[p.Batch]||[]).push(p)});Object.keys(by).reverse().forEach(b=>{const L=by[b];h+='<div class="card"><b>'+esc(L[0].Jenis=='Masuk'?'Barang Masuk':'Hitung Stok')+' <span class="badge '+esc(L[0].Status)+'">'+esc(L[0].Status)+'</span></b><small>'+esc(L[0].Waktu)+(L[0].Ref?' • '+esc(L[0].Ref):'')+'</small><div style="margin-top:5px">'+L.map(p=>'• '+esc(p.Nama)+': <b>'+esc(p.Qty)+' '+esc(p.Satuan)+'</b>').join('<br>')+'</div></div>'});
 if(D.permintaan.length){h+='<h3>Permintaan barang</h3>'+D.permintaan.map(q=>'<div class="card"><b>'+esc(q.Nama)+': '+esc(q.Qty)+' '+esc(q.Satuan)+' <span class="badge '+esc(q.Status)+'">'+esc(q.Status)+'</span></b><small>'+esc(q.Waktu)+(q.Catatan?' • '+esc(q.Catatan):'')+'</small></div>').join('')}
@@ -198,7 +204,8 @@ def add_staff_routes(app, sheets_getter, notify):
         await asyncio.to_thread(sheets.prefetch)
         from stokweb import _stok_items
         items = await asyncio.to_thread(_stok_items, sheets)
-        orders = await asyncio.to_thread(sheets.get_orders_gudang, 40)
+        semua = await asyncio.to_thread(sheets.get_orders_gudang, 300)
+        orders = [o for o in semua if not o["dikirim"]] + [o for o in semua if o["dikirim"]][:30]
         peng = await asyncio.to_thread(sheets.get_pengajuan, None, st["id"])
         perm = await asyncio.to_thread(sheets.get_permintaan, st["id"], None, 30)
         peng = sorted(peng, key=lambda p: str(p.get("Waktu", "")))[-120:]

@@ -210,6 +210,12 @@ def add_stok_routes(app, sheets_getter, notify=None):
                 except Exception:
                     logger.exception("gagal banding PO")
         perm = await asyncio.to_thread(sheets.get_permintaan, None, "Baru", 50)
+        perm_selesai = [r for r in await asyncio.to_thread(sheets.get_permintaan, None, "Selesai", 30)]
+        try:
+            disetujui = await asyncio.to_thread(sheets.get_pengajuan_disetujui, 3)
+        except Exception:
+            logger.exception("gagal ambil pengajuan disetujui")
+            disetujui = []
         try:
             po_belum = await asyncio.to_thread(sheets.get_po_untuk_terima, True, 40)
         except Exception:
@@ -217,7 +223,7 @@ def add_stok_routes(app, sheets_getter, notify=None):
             po_belum = []
         orders = await asyncio.to_thread(sheets.get_orders_gudang, 15)
         return web.json_response({"ok": True, "pengajuan": list(batches.values()), "permintaan": perm,
-                                  "po_belum": po_belum,
+                                  "po_belum": po_belum, "permintaan_selesai": perm_selesai, "disetujui": disetujui,
                                   "orders": orders})
 
     async def decide(request):
@@ -349,6 +355,31 @@ def add_stok_routes(app, sheets_getter, notify=None):
         return web.json_response({"ok": True, "pos": [{"no_po": h["no_po"], "supplier": h["supplier"], "total": h["total"]}
                                                       for h in hasil], "gagal": gagal})
 
+    async def setstok(request):
+        if not await _link(request, ("@owner",)):
+            return web.json_response({"ok": False}, status=404)
+        body = await request.json()
+        import re as _re
+        raw = str(body.get("qty", "")).strip().replace(" ", "")
+        if _re.fullmatch(r"\d{1,3}(\.\d{3})+", raw):      # 2.500 = dua ribu lima ratus
+            raw = raw.replace(".", "")
+        try:
+            qty = float(raw.replace(",", "."))
+        except ValueError:
+            return web.json_response({"ok": False, "error": "Angka salah"}, status=400)
+        if qty < 0 or qty > 10_000_000:
+            return web.json_response({"ok": False, "error": "Angka salah"}, status=400)
+        ok = await asyncio.to_thread(sheets_getter().set_stok_owner, str(body.get("code", "")), qty)
+        return web.json_response({"ok": ok})
+
+    async def jadihitung(request):
+        if not await _link(request, ("@owner",)):
+            return web.json_response({"ok": False}, status=404)
+        n = await asyncio.to_thread(sheets_getter().jadikan_stok_real, str((await request.json()).get("batch", "")))
+        return web.json_response({"ok": n > 0, "n": n})
+
+    app.router.add_post("/dashboard/{token}/setstok", setstok)
+    app.router.add_post("/dashboard/{token}/jadihitung", jadihitung)
     app.router.add_post("/dashboard/{token}/popermintaan", po_permintaan)
     app.router.add_post("/dashboard/{token}/tutuppo", tutup_po)
     app.router.add_post("/dashboard/{token}/bayarkomisi", bayar_komisi)

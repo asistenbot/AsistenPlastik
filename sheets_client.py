@@ -1539,6 +1539,40 @@ class SheetsClient:
             rows = [r for r in rows if str(r.get("Staff", "")) == staff]
         return rows
 
+    def set_stok_owner(self, code, qty, oleh="owner (dashboard)"):
+        """Owner langsung nyetel stok real 1 barang (dicatat sebagai Hitung)."""
+        p = next((r for r in self.get_price_list() if str(r.get("Item_Code", "")).strip().upper() == str(code).strip().upper()), None)
+        if not p:
+            return False
+        self.add_mutasi([{"item_code": str(p["Item_Code"]).strip(), "nama": self._label_produk(p), "jenis": "Hitung",
+                          "qty": qty, "satuan": str(p.get("Satuan", "")), "ref": "", "catatan": "Diubah owner",
+                          "oleh": oleh}])
+        return True
+
+    def get_pengajuan_disetujui(self, hari=3):
+        """Batch pengajuan stok yang udah DISETUJUI beberapa hari terakhir (buat dicek / dijadiin stok real)."""
+        batas = (_today_date() - datetime.timedelta(days=hari)).strftime("%Y-%m-%d")
+        by = {}
+        for r in self.get_pengajuan("Disetujui"):
+            if str(r.get("Diputuskan_Waktu", "") or r.get("Waktu", ""))[:10] < batas:
+                continue
+            b = by.setdefault(r["Batch"], {"batch": r["Batch"], "staff": r.get("Staff", ""), "jenis": r.get("Jenis", ""),
+                                            "waktu": str(r.get("Diputuskan_Waktu", "") or r.get("Waktu", "")),
+                                            "ref": r.get("Ref", ""), "items": []})
+            b["items"].append({"code": r.get("Item_Code", ""), "nama": r.get("Nama", ""), "qty": r.get("Qty", ""),
+                               "satuan": r.get("Satuan", "")})
+        return sorted(by.values(), key=lambda b: b["waktu"], reverse=True)
+
+    def jadikan_stok_real(self, batch, oleh="owner (dashboard)"):
+        """Angka di 1 batch yang udah disetujui dijadiin STOK REAL sekarang (Hitung)."""
+        rows = [r for r in self.get_pengajuan("Disetujui") if r.get("Batch") == batch]
+        if not rows:
+            return 0
+        self.add_mutasi([{"item_code": r["Item_Code"], "nama": r.get("Nama", ""), "jenis": "Hitung", "qty": r.get("Qty"),
+                          "satuan": r.get("Satuan", ""), "ref": batch, "catatan": f"Dijadiin stok real dari {batch}",
+                          "oleh": oleh} for r in rows])
+        return len(rows)
+
     _putus_lock = threading.Lock()
 
     def decide_pengajuan(self, batch, approve, oleh="owner"):
@@ -1872,7 +1906,9 @@ class SheetsClient:
         gagal = [{nama, alasan}] buat barang yang supplier/harga belinya kosong."""
         with self._po_minta_lock:
             want = {str(p) for p in pids}
-            rows = [r for r in self.get_permintaan(None, "Baru", 500) if str(r.get("ID", "")) in want]
+            # "Selesai" = udah keburu ditandai beres tapi belum dibikinin PO -> boleh diulang
+            rows = [r for r in self.get_permintaan(None, None, 1000)
+                    if str(r.get("ID", "")) in want and r.get("Status") in ("Baru", "Selesai")]
             pl = {str(p.get("Item_Code", "")).strip().upper(): p for p in self.get_price_list()}
             per_sup, gagal = {}, []
             for r in rows:
@@ -1911,7 +1947,7 @@ class SheetsClient:
         if not r0:
             return []
         return [str(r["ID"]) for r in rows if r.get("Waktu") == r0.get("Waktu") and r.get("Staff") == r0.get("Staff")
-                and r.get("Status") == "Baru"]
+                and r.get("Status") in ("Baru", "Selesai")]
 
     # pengiriman order (staff tandai barang udah keluar/dikirim)
     def get_pengiriman_map(self):

@@ -14,7 +14,7 @@ header h1{margin:0;font-size:16.5px;font-weight:800;letter-spacing:-.3px;line-he
 .hctl{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 header input,.chip,.ib{-webkit-appearance:none;border:1px solid var(--ln2);background:var(--sf);color:var(--tx);border-radius:10px;padding:8px 12px;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer}
 .chip:hover,.ib:hover{background:var(--sf2)}
-.tabs{display:flex;gap:6px;overflow-x:auto;padding:10px max(12px,env(safe-area-inset-left));position:sticky;top:0;z-index:5;-webkit-overflow-scrolling:touch;scrollbar-width:none;background:var(--bg);border-bottom:1px solid var(--ln)}
+.tabs{display:flex;gap:6px;overflow-x:auto;padding:10px max(12px,env(safe-area-inset-left));position:sticky;top:0;z-index:20;-webkit-overflow-scrolling:touch;scrollbar-width:none;background:var(--bg);border-bottom:1px solid var(--ln)}
 .tabs::-webkit-scrollbar{display:none}
 .tabs button{-webkit-appearance:none;flex:0 0 auto;padding:9px 14px;border:1px solid var(--ln);background:var(--sf);font:inherit;font-size:13.5px;font-weight:600;color:var(--mu);border-radius:999px;white-space:nowrap;cursor:pointer}
 .tabs button:hover{color:var(--tx)}
@@ -77,7 +77,7 @@ a.btn{text-decoration:none}
 .grid2{display:grid;grid-template-columns:1fr;gap:0 14px}
 @media(prefers-reduced-motion:reduce){.pane.on{animation:none}}
 @media(min-width:900px){.card b{font-size:24px}.grid2{grid-template-columns:1fr 1fr}}
-@media(max-width:700px){.cards{grid-template-columns:repeat(2,1fr);gap:8px}.card{padding:12px 13px}header{padding-top:12px;padding-bottom:12px}#prAll{display:none}.chip,.ib{padding:7px 10px;font-size:13px}td:first-child{width:62%}td .btn.s{padding:6px 9px;font-size:12px}.hb .l{flex-basis:44%}.hide-s{display:none}header .hctl{width:100%;flex-wrap:nowrap}header input{flex:1;width:0;min-width:110px}}
+@media(max-width:700px){.cards{grid-template-columns:repeat(2,1fr);gap:8px}.card{padding:12px 13px}header{padding-top:12px;padding-bottom:12px}#prAll{display:none}.chip,.ib{padding:7px 10px;font-size:13px}th,td{padding:10px 8px;font-size:13.5px}td:first-child{width:auto}td.n{font-size:13px}.pill{white-space:normal;text-align:center}td .btn.s,td a.btn{font-size:11.5px!important;padding:5px 7px!important}td .btn.s{padding:6px 9px;font-size:12px}.hb .l{flex-basis:44%}.hide-s{display:none}header .hctl{width:100%;flex-wrap:nowrap}header input{flex:1;width:0;min-width:110px}}
 @media(min-width:1180px){
 body{display:grid;grid-template-columns:240px 1fr;grid-template-rows:auto 1fr}
 header{grid-column:1/-1}
@@ -87,6 +87,28 @@ header{grid-column:1/-1}
 .tabs button.on{background:var(--blu);color:#fff}
 main{grid-column:2;margin:0;max-width:1100px;padding:20px 26px 56px}
 }
+
+.ch{display:flex;gap:8px;height:200px;margin-top:4px}.ya{display:flex;flex-direction:column;justify-content:space-between;font-size:10.5px;color:var(--mu);text-align:right;min-width:34px;padding-bottom:20px}.ya span{line-height:0}
+.pl{flex:1;position:relative;min-width:0}.gl{position:absolute;inset:0 0 20px 0;display:flex;flex-direction:column;justify-content:space-between}.gl i{display:block;border-top:1px dashed var(--ln)}
+.cols{position:absolute;inset:0;display:flex;gap:4px}.col{flex:1;display:flex;flex-direction:column;align-items:center;position:relative;min-width:0;outline:none;cursor:pointer}
+.bs{flex:1;width:100%;display:flex;align-items:flex-end;justify-content:center;gap:3px}.bs i{display:block;width:100%;max-width:18px;border-radius:999px;min-height:3px;background:#D5DAE4}
+.cols:not(.many) .bs i{max-width:22px}.bs i.s1{background:#D5DAE4}.ch .bs i.s0{background:#D5DAE4}.col.hi .bs i.s0{background:var(--blu)}
+.cols .bs i.s0:not(:only-child){background:var(--blu)}
+.col small{height:20px;line-height:20px;font-size:10.5px;color:var(--mu);white-space:nowrap}
+.col .tip{display:none;position:absolute;bottom:calc(100% - 10px);left:50%;transform:translateX(-50%);background:#1A2233;color:#fff;border-radius:10px;padding:7px 10px;font-size:12px;white-space:nowrap;z-index:3;box-shadow:0 8px 20px -8px rgba(0,0,0,.4);pointer-events:none}
+.col .tip b{display:block;font-size:12px;margin-bottom:2px}.col:hover .tip,.col:focus .tip{display:block}.col:first-child .tip{left:0;transform:none}.col:last-child .tip{left:auto;right:0;transform:none}
+.col:hover .bs i,.col:focus .bs i{filter:brightness(.92)}
+em.d{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:0;font-style:normal}em.d.s0{background:var(--blu)}em.d.s1{background:#D5DAE4}
+.tip em.d.s1{background:#8C96AB}
+.lg2{display:flex;gap:16px;font-size:12.5px;color:var(--mu);margin-top:8px;font-weight:600}
+.rgw{display:flex;align-items:center;gap:18px;flex-wrap:wrap}.rg,.bb{width:190px;max-width:100%;flex:0 0 auto;margin:0 auto}.bb{width:230px}
+.rg .rv{font-size:22px;font-weight:800;fill:var(--tx)}.rg .rl{font-size:11px;fill:var(--mu)}
+.rleg{flex:1;min-width:200px}.rleg div{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--ln);font-size:13.5px}.rleg div:last-child{border-bottom:0}
+.rleg span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}.rleg b{font-weight:700}
+em.pc{font-style:normal;font-size:11.5px;font-weight:700;background:var(--blu2);color:var(--blu);border-radius:999px;padding:2px 8px;min-width:40px;text-align:center}
+em.bdg{font-style:normal;font-size:11px;font-weight:700;border-radius:999px;padding:2px 7px;margin-right:2px}em.bdg.up{background:var(--okbg);color:#15803D}em.bdg.dn{background:var(--redbg);color:#BE123C}
+.cards>.card.blu:first-child em.bdg{background:rgba(255,255,255,.2);color:#fff}
+@media(max-width:700px){.ch{height:180px}.cols.many small{font-size:9.5px}}
 #phead{display:none}
 @media print{
 html,body{background:#fff!important;color:#000!important;display:block!important}.card,.box,table,th,td,.cards,.empty,.act{background:#fff!important;color:#000!important}.card b,.mut,.mut b,th,small,.card span{color:#000!important}.hb .t i,.vc i{background:#333!important;box-shadow:none!important}.todo{display:none}
@@ -98,7 +120,7 @@ main{max-width:none;padding:0}.pane{display:none}.pane.on{display:block}
 body.printall .pane{display:block}body.printall .pane#p_stok,body.printall .pane#p_gudang{display:none}body.printall .pane+.pane{page-break-before:always}
 .card,.box,.act,tr{break-inside:avoid;border-color:#888!important;box-shadow:none}
 .cards{grid-template-columns:repeat(4,1fr)}
-.hb .t i,.vc i,.pill{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.hb .t i,.vc i,.bs i,.rg circle,.bb circle,.pill{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 table{font-size:10pt}th{background:#eee!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 td input{border:0!important;background:none!important;width:auto!important;text-align:right}
 .hide-s{display:table-cell!important}
@@ -144,7 +166,26 @@ document.getElementById('tabs').onclick=e=>{const b=e.target.closest('button');i
 function card(l,v,cls,sub){return '<div class="card '+(cls||'')+'"><span>'+l+'</span><b>'+v+'</b>'+(sub?'<small>'+sub+'</small>':'')+'</div>'}
 function hbars(arr,empty){if(!arr||!arr.length)return '<div class="empty">'+(empty||'Belum ada data.')+'</div>';const mx=Math.max(...arr.map(a=>a.total),1);
 return arr.map(a=>'<div class="hb"><div class="l" title="'+esc(a.nama)+'">'+esc(a.nama)+'</div><div class="t"><i style="width:'+Math.max(a.total/mx*100,1)+'%"></i></div><div class="v">'+rps(a.total)+'</div></div>').join('')}
-function vbars(arr,key,lab){const mx=Math.max(...arr.map(a=>a[key]),1);const td=new Date(Date.now()+7*3600e3).toISOString().slice(0,10);let hi=arr.findIndex(a=>a.tgl==td);if(hi<0){hi=arr.length-1;if(arr.length&&arr[0].tgl&&String(arr[0].tgl).length==10)for(let i=arr.length-1;i>=0;i--)if(arr[i][key]>0){hi=i;break}}return '<div class="vc">'+arr.map((a,i)=>'<div'+(i==hi?' class="hi"':'')+' title="'+esc(a.tgl||a.bulan)+': '+rp(a[key])+'"><i style="height:'+(a[key]/mx*100)+'%"></i><small>'+lab(a)+'</small></div>').join('')+'</div>'}
+function nice(m){if(m<=0)return 1;const e=Math.pow(10,Math.floor(Math.log10(m))),f=m/e;return (f<=1?1:f<=2?2:f<=2.5?2.5:f<=5?5:10)*e}
+function sk(n){const a=Math.abs(n);return a>=1e9?(n/1e9).toFixed(a%1e9?1:0).replace('.',',')+' M':a>=1e6?(n/1e6).toFixed(a%1e6?1:0).replace('.',',')+' jt':a>=1e3?Math.round(n/1e3)+' rb':String(Math.round(n))}
+function chart(arr,keys,names,lab,hiIdx){const mx=nice(Math.max(1,...arr.flatMap(a=>keys.map(k=>a[k]||0)))/4)*4;const tk=[4,3,2,1,0].map(i=>mx*i/4);
+const many=arr.length>14;
+return '<div class="ch"><div class="ya">'+tk.map(t=>'<span>'+sk(t)+'</span>').join('')+'</div><div class="pl"><div class="gl">'+tk.map(()=>'<i></i>').join('')+'</div><div class="cols'+(many?' many':'')+'">'+
+arr.map((a,i)=>'<div class="col'+(i==hiIdx?' hi':'')+'" tabindex="0"><div class="bs">'+keys.map((k,j)=>'<i class="s'+j+'" style="height:'+((a[k]||0)/mx*100)+'%"></i>').join('')+'</div><div class="tip"><b>'+esc(a.label||a.bulan||dmy(a.tgl))+'</b>'+keys.map((k,j)=>'<div><em class="d s'+j+'"></em>'+esc(names[j])+': '+rp(a[k]||0)+'</div>').join('')+'</div><small>'+lab(a,i)+'</small></div>').join('')+
+'</div></div></div>'+(keys.length>1?'<div class="lg2">'+names.map((n,j)=>'<span><em class="d s'+j+'"></em>'+esc(n)+'</span>').join('')+'</div>':'')}
+function vbars(arr,key,lab){const td=new Date(Date.now()+7*3600e3).toISOString().slice(0,10);let hi=arr.findIndex(a=>a.tgl==td);if(hi<0){hi=arr.length-1;if(arr.length&&arr[0].tgl&&String(arr[0].tgl).length==10)for(let i=arr.length-1;i>=0;i--)if(arr[i][key]>0){hi=i;break}}
+return chart(arr,[key],['Omzet'],lab,hi)}
+function rings(arr,title){if(!arr||!arr.length)return '<div class="empty">Belum ada data.</div>';const T=arr.reduce((a,b)=>a+b.total,0)||1;const top=arr.slice(0,3),C=['#4361EE','#F87171','#9DB0FA'];
+let svg='<svg viewBox="0 0 200 200" class="rg">';top.forEach((a,i)=>{const r=86-i*16,c=2*Math.PI*r,f=Math.max(a.total/T,0.01);
+svg+='<circle cx="100" cy="100" r="'+r+'" fill="none" stroke="#EEF0F5" stroke-width="10"/><circle cx="100" cy="100" r="'+r+'" fill="none" stroke="'+C[i]+'" stroke-width="10" stroke-linecap="round" stroke-dasharray="'+(c*f*0.75)+' '+c+'" transform="rotate(135 100 100)"/>'});
+svg+='<text x="100" y="98" text-anchor="middle" class="rv">'+esc(sk(T))+'</text><text x="100" y="118" text-anchor="middle" class="rl">'+esc(title)+'</text></svg>';
+return '<div class="rgw">'+svg+'<div class="rleg">'+arr.slice(0,5).map((a,i)=>'<div><em class="d" style="background:'+(C[i]||'#C3C9D6')+'"></em><span>'+esc(a.nama)+'</span><b>'+rps(a.total)+'</b><em class="pc">'+Math.round(a.total/T*100)+'%</em></div>').join('')+'</div></div>'}
+function bubbles(arr){if(!arr||!arr.length)return '<div class="empty">Belum ada data.</div>';const A=arr.slice(0,5),mx=A[0].total||1,R=62;const rr=A.map(a=>Math.max(20,Math.sqrt(a.total/mx)*R));
+const P=[[0,0]],ang=[200,330,90,20];for(let i=1;i<A.length;i++){const d=rr[0]+rr[i]-6,t=ang[i-1]*Math.PI/180;P.push([Math.cos(t)*d,Math.sin(t)*d])}
+const C=['#4361EE','#6C84F2','#9DB0FA','#C3CFFC','#DDE4FD'],TX=['#fff','#fff','#fff','#1A2233','#1A2233'];
+let svg='<svg viewBox="-140 -95 280 190" class="bb">';A.map((a,i)=>i).reverse().forEach(i=>{svg+='<circle cx="'+P[i][0]+'" cy="'+P[i][1]+'" r="'+rr[i]+'" fill="'+C[i]+'" stroke="#fff" stroke-width="3"/>'+(rr[i]>=22?'<text x="'+P[i][0]+'" y="'+(P[i][1]+5)+'" text-anchor="middle" fill="'+TX[i]+'" style="font-size:'+(rr[i]>40?15:12)+'px;font-weight:700">'+esc(sk(A[i].total))+'</text>':'')});svg+='</svg>';
+return '<div class="rgw">'+svg+'<div class="rleg">'+A.map((a,i)=>'<div><em class="d" style="background:'+C[i]+'"></em><span>'+esc(a.nama)+'</span><b>'+rps(a.total)+'</b></div>').join('')+'</div></div>'}
+function chg(){if(!L||L.bulan=='semua'||!L.tren||L.tren.length<2)return '';const a=L.tren[L.tren.length-1].omzet,b=L.tren[L.tren.length-2].omzet;if(!b)return '';const p=(a-b)/b*100;return ' <em class="bdg '+(p>=0?'up':'dn')+'">'+(p>=0?'▲ ':'▼ ')+Math.abs(p).toFixed(p>-10&&p<10?1:0).replace('.',',')+'%</em> vs bulan lalu'}
 function dok(inv){return '<a class="btn s k" style="text-decoration:none;display:inline-block" target="_blank" rel="noopener" href="'+B+'/dok/'+encodeURIComponent(inv)+'/inv">🧾 Invoice</a> <a class="btn s k" style="text-decoration:none;display:inline-block" target="_blank" rel="noopener" href="'+B+'/dok/'+encodeURIComponent(inv)+'/sj">🚚 Surat Jalan</a> <a class="btn s k" style="text-decoration:none;display:inline-block" href="'+B+'/dok/'+encodeURIComponent(inv)+'/invtxt">📝 Inv teks</a> <a class="btn s k" style="text-decoration:none;display:inline-block" href="'+B+'/dok/'+encodeURIComponent(inv)+'/sjtxt">📝 SJ teks</a> <button class="btn s" style="background:var(--blu)" data-th="'+esc(inv)+'">📠 Thermal</button>'}
 function pill(k,telat){if(telat)return '<span class="pill p-telat">Lewat tempo</span>';return k=='belum'?'<span class="pill p-belum">Belum kontra bon</span>':k=='sudah'?'<span class="pill p-sudah">Sudah kontra bon</span>':'<span class="pill p-x">Tanpa kontra bon</span>'}
 
@@ -161,23 +202,22 @@ if(r.stok_menipis)T('🟡',r.stok_menipis+' barang stoknya menipis','stok','Stok
 let h=a.length?'<div class="todo"><h3>Yang perlu diurus</h3>'+a.map(x=>'<button data-go="'+x[2]+'"><span class="ic">'+x[0]+'</span><span class="tx">'+esc(x[1])+'</span><span class="go">'+x[3]+'</span></button>').join('')+'</div>'
 :'<div class="todo clear"><h3>Semua beres 👍</h3><p>Gak ada yang perlu diurus sekarang.</p></div>';
 h+='<div class="sec"><h2>Penjualan</h2><span>'+esc(L.bulan_label)+'</span></div><div class="cards">'+
-card('Omzet',rps(r.omzet),'blu',r.jml_invoice+' invoice')+card('Laba kotor (perkiraan)',rps(r.laba_kotor),r.laba_kotor>=0?'grn':'red',(r.laba_lengkap?'dari harga beli':'harga beli belum lengkap')+(r.komisi_bulan?' · udah dipotong komisi '+rps(r.komisi_bulan):''))+
+card('Omzet',rps(r.omzet),'blu',r.jml_invoice+' invoice'+chg())+card('Laba kotor (perkiraan)',rps(r.laba_kotor),r.laba_kotor>=0?'grn':'red',(r.laba_lengkap?'dari harga beli':'harga beli belum lengkap')+(r.komisi_bulan?' · udah dipotong komisi '+rps(r.komisi_bulan):''))+
 card('Udah dibayar',rps(r.lunas),'grn')+card('Belum dibayar',rps(r.belum_lunas),'amb')+'</div>'+
 '<div class="sec"><h2>Piutang & utang</h2><span>sampai hari ini</span></div><div class="cards">'+
 card('Piutang customer',rps(r.total_piutang),'amb',r.jml_tagihan+' invoice')+card('Belum kontra bon',r.belum_kontra_bon,r.belum_kontra_bon?'red':'grn','invoice')+
 card('Lewat tempo',rps(r.total_telat),r.telat?'red':'grn',r.telat+' invoice')+card('Utang supplier',rps(r.total_utang),'amb',r.jml_po_terbuka+' PO belum lunas')+'</div>'+
 '<div class="sec"><h2>Kas</h2><span>'+esc(L.bulan_label)+'</span></div><div class="cards">'+
 card('Kas masuk',rps(r.kas_masuk),'grn')+card('Kas keluar',rps(r.kas_keluar),'red')+card('Laba kas',rps(r.kas_laba),r.kas_laba>=0?'grn':'red')+card('Saldo kas',rps(r.saldo_kas),'blu','semua waktu')+'</div>';
-h+='<div class="grid2"><div><h2>Omzet 6 bulan</h2><div class="box">'+vbars(L.tren,'omzet',a=>esc(a.bulan))+'</div></div>';
-h+='<div><h2>Kas masuk vs keluar</h2><div class="box"><div class="vc vc2">'+(()=>{const mx=Math.max(...L.tren.map(a=>Math.max(a.kas_masuk,a.kas_keluar)),1);return L.tren.map(a=>'<div title="'+esc(a.bulan)+'"><i style="height:'+(a.kas_masuk/mx*100)+'%"></i><i style="height:'+(a.kas_keluar/mx*100)+'%;background:#d9392b"></i><small>'+esc(a.bulan)+'</small></div>').join('')})()+'</div><div class="lg"><b style="background:var(--g)"></b>Masuk<b style="background:#d9392b"></b>Keluar</div></div></div></div>';
+h+='<div class="grid2"><div><h2>Omzet 6 bulan</h2><div class="box">'+chart(L.tren,['omzet'],['Omzet'],a=>esc(a.bulan),L.tren.length-1)+'</div></div><div><h2>Kas masuk vs keluar</h2><div class="box">'+chart(L.tren,['kas_masuk','kas_keluar'],['Masuk','Keluar'],a=>esc(a.bulan),L.tren.length-1)+'</div></div></div>';
 h+='<h2 id="web">🌐 Order web menunggu persetujuan</h2>'+(L.web_list.length?'<div class="box">'+L.web_list.map(w=>'<div>• <b>'+esc(w.nama)+'</b> — '+w.n_item+' item • '+esc(w.waktu)+'</div>').join('')+'<div class="mut" style="margin-top:6px">Klik ✅ Simpan di Telegram biar jadi invoice.</div></div>':'<div class="empty">Gak ada.</div>');
 h+='<h2 id="kirim">🚚 Invoice belum dikirim</h2>'+(L.belum_kirim_list.length?'<div style="margin:6px 0"><button class="btn k" id="kirimAll">✅ Tandai SEMUA sudah dikirim ('+L.ringkas.belum_kirim+')</button></div><table><thead><tr><th>Invoice</th><th>Customer</th><th>Req. kirim</th></tr></thead><tbody>'+L.belum_kirim_list.map(o=>'<tr><td>'+esc(o.invoice)+'<br><small style="color:var(--mu)">'+dmy(o.tgl)+' • '+o.n_item+' item</small><div style="margin-top:4px">'+dok(o.invoice)+' <button class="btn s" data-kirim="'+esc(o.invoice)+'">✅ Sudah dikirim</button></div></td><td>'+esc(o.customer)+'</td><td>'+(o.kirim?esc(o.kirim):'-')+'</td></tr>').join('')+'</tbody></table>':'<div class="empty">Semua udah dikirim 🎉</div>');
 document.getElementById('p_ringkasan').innerHTML=h}
 
-function renderPenjualan(){const r=L.ringkas;let h='<div class="cards">'+card('Omzet '+esc(L.bulan_label),rps(r.omzet),'blu')+card('Jumlah invoice',r.jml_invoice)+card('Rata-rata / invoice',rps(r.rata_invoice))+card('Estimasi laba kotor',rps(r.laba_kotor),'grn',r.laba_lengkap?'':'harga beli belum lengkap')+'</div>';
+function renderPenjualan(){const r=L.ringkas;let h='<div class="cards">'+card('Omzet '+esc(L.bulan_label),rps(r.omzet),'blu',chg().replace(/^ /,''))+card('Jumlah invoice',r.jml_invoice)+card('Rata-rata / invoice',rps(r.rata_invoice))+card('Estimasi laba kotor',rps(r.laba_kotor),'grn',r.laba_lengkap?'':'harga beli belum lengkap')+'</div>';
 h+=L.bulan=='semua'?'<h2>Omzet per bulan</h2><div class="box">'+vbars(L.harian,'total',a=>esc(a.label||a.tgl))+'</div>':'<h2>Omzet per hari</h2><div class="box">'+vbars(L.harian,'total',a=>(+a.tgl.slice(8,10))%5==1||a.tgl.slice(8,10)=='31'?+a.tgl.slice(8,10):'')+'</div>';
-h+='<h2>Customer teratas</h2><div class="box">'+hbars(L.top_customer)+'</div>';
-h+='<h2>Produk terlaris (rupiah)</h2><div class="box">'+hbars(L.top_produk.map(p=>({nama:p.nama+' ('+fmt(p.qty)+' '+p.satuan+')',total:p.total})))+'</div>';
+h+='<div class="grid2"><div><h2>Customer teratas</h2><div class="box">'+bubbles(L.top_customer)+'</div></div>';
+h+='<div><h2>Produk terlaris</h2><div class="box">'+rings(L.top_produk.map(p=>({nama:p.nama+' ('+fmt(p.qty)+' '+p.satuan+')',total:p.total})),'omzet produk')+'</div></div></div>';
 h+='<h2>Per kategori</h2><div class="box">'+hbars(L.per_kategori)+'</div>';
 h+='<h2>Daftar invoice bulan ini</h2>'+(L.invoice_bulan.length?'<table><thead><tr><th>Invoice</th><th>Customer</th><th class="n">Total</th><th>Pembayaran</th></tr></thead><tbody>'+L.invoice_bulan.map(o=>'<tr><td>'+esc(o.invoice)+'<br><small style="color:var(--mu)">'+dmy(o.tgl)+'</small><div style="margin-top:4px">'+dok(o.invoice)+'</div></td><td>'+esc(o.customer)+'</td><td class="n">'+rp(o.total)+'</td><td>'+(o.status=='Lunas'?'<span class="pill p-sudah">✅ Lunas</span>':'<span class="pill p-belum">Belum bayar</span>')+'</td></tr>').join('')+'</tbody></table>':'<div class="empty">Belum ada invoice bulan ini.</div>');
 document.getElementById('p_penjualan').innerHTML=h}

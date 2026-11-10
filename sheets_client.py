@@ -34,7 +34,7 @@ SCOPES = [
 SCHEMA = {
     config.SHEET_PRICELIST: [
         "Item_Code", "Nama", "Deskripsi", "Kategori", "Satuan",
-        "Harga_Jual", "Harga_Beli", "Khusus_Customer", "Supplier", "Isi_Bal", "Stok_Min",
+        "Harga_Jual", "Harga_Beli", "Khusus_Customer", "Supplier", "Isi_Bal", "Stok_Min", "Qty_Order",
     ],
     config.SHEET_MUTASI: ["Waktu", "Item_Code", "Nama", "Jenis", "Qty", "Satuan", "Ref", "Catatan", "Oleh"],
     config.SHEET_HARGA_CUSTOMER: ["Customer", "Item_Code", "Harga_Jual"],
@@ -1958,10 +1958,17 @@ class SheetsClient:
                                   "Harga beli kosong di PriceList" if p else "Barang gak ada di PriceList"})
                     continue
                 per_sup.setdefault(sup, []).append((r, p, hb))
-            hasil = []
+            return self._po_per_supplier(per_sup), gagal
+
+    def _po_per_supplier(self, per_sup):
+        """per_sup: {supplier: [(row_permintaan_atau_None, produk, harga_beli[, qty])]} -> bikin PO."""
+        hasil = []
+        if True:
             for sup, isi in per_sup.items():
                 gabung = {}
-                for r, p, hb in isi:
+                for t in isi:
+                    r, p, hb = t[0], t[1], t[2]
+                    r = r or {"Qty": t[3] if len(t) > 3 else 0, "ID": "", "Satuan": p.get("Satuan", "")}
                     k = str(p["Item_Code"]).strip().upper()
                     g = gabung.setdefault(k, {"nama_item": self._label_produk(p), "qty": 0.0,
                                               "satuan": str(p.get("Satuan", "") or r.get("Satuan", "")),
@@ -1972,10 +1979,64 @@ class SheetsClient:
                 no_po, total = self.add_purchase_order(sup, [{k: v for k, v in i.items() if k != "_ids"} for i in items])
                 for i in items:
                     for pid in i["_ids"]:
-                        self.set_permintaan_status(pid, f"PO {no_po}")
+                        if pid:
+                            self.set_permintaan_status(pid, f"PO {no_po}")
                 hasil.append({"no_po": no_po, "supplier": sup, "total": total,
                               "items": [{k: v for k, v in i.items() if k != "_ids"} for i in items]})
-            return hasil, gagal
+        return hasil
+
+    def qty_order_default(self, p):
+        """Jumlah order otomatis: kolom Qty_Order, atau aturan kategori (mis. SAMPAH 125)."""
+        q = self._f(p.get("Qty_Order"))
+        if q > 0:
+            return q
+        return float(config.QTY_ORDER_KATEGORI.get(str(p.get("Kategori", "")).strip().upper(), 0))
+
+    def po_sedang_jalan(self):
+        """{item_code: [(no_po, sisa_stok)]} buat PO yang barangnya belum datang lengkap."""
+        out = {}
+        for d in self._po_lines().values():
+            if d["lengkap"] or d["ditutup"]:
+                continue
+            for it in d["items"]:
+                if it["code"] and it["sisa_stok"] > 0:
+                    out.setdefault(it["code"].upper(), []).append((d["po"], it["sisa_stok"]))
+        return out
+
+    def saran_order(self, codes=None):
+        """Barang menipis/habis + jumlah order + supplier + PO yang lagi jalan."""
+        pl = {str(p.get("Item_Code", "")).strip().upper(): p for p in self.get_price_list()}
+        jalan = self.po_sedang_jalan()
+        out = []
+        for i in self.get_stok_all():
+            if i["status"] not in ("habis", "menipis"):
+                continue
+            k = str(i["code"]).upper()
+            if codes is not None and k not in codes:
+                continue
+            p = pl.get(k, {})
+            out.append({**i, "qty_order": self.qty_order_default(p), "supplier": str(p.get("Supplier", "") or "").strip(),
+                        "harga_beli": self._f(p.get("Harga_Beli")), "po_jalan": jalan.get(k, [])})
+        return out
+
+    _po_stok_lock = threading.Lock()
+
+    def buat_po_barang(self, pesanan):
+        """pesanan: [(item_code, qty)] -> PO per supplier. Balikin (daftar_po, gagal)."""
+        with self._po_stok_lock:
+            pl = {str(p.get("Item_Code", "")).strip().upper(): p for p in self.get_price_list()}
+            per_sup, gagal = {}, []
+            for code, qty in pesanan:
+                p = pl.get(str(code).strip().upper())
+                sup = str((p or {}).get("Supplier", "") or "").strip()
+                hb = self._f((p or {}).get("Harga_Beli"))
+                if not p or not sup or hb <= 0 or qty <= 0:
+                    gagal.append({"code": code, "nama": self._label_produk(p) if p else code,
+                                  "alasan": "Barang gak ada di PriceList" if not p else "Supplier kosong (isi pakai /supplier)"
+                                  if not sup else "Harga beli kosong" if hb <= 0 else "Jumlah 0"})
+                    continue
+                per_sup.setdefault(sup, []).append((None, p, hb, qty))
+            return self._po_per_supplier(per_sup), gagal
 
     def permintaan_satu_kiriman(self, pid):
         """Semua ID permintaan (status Baru) yang dikirim barengan sama `pid`."""

@@ -152,6 +152,8 @@ SHEET_STAFF = "Staff"
 SHEET_PENGAJUAN = "PengajuanStok"
 SHEET_PERMINTAAN = "PermintaanBarang"
 SHEET_PENERIMAAN = "PenerimaanPO"
+# jumlah PO otomatis per kategori kalau kolom Qty_Order di PriceList kosong
+QTY_ORDER_KATEGORI = {"SAMPAH": 125}
 SHEET_KOMISI = "Komisi"               # setting komisi jalur belakang per customer (RAHASIA)
 SHEET_KOMISI_CATAT = "KomisiCatatan"  # komisi per invoice yang udah lunas: belum/sudah dibayar
 SHEET_PENGIRIMAN = "PengirimanOrder"

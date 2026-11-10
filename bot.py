@@ -865,6 +865,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["awaiting"] = None
         await _process_po_text(update, context, text)
         return
+    if awaiting == "so_qty":
+        q = _parse_angka_harga(text.strip().split()[0]) if text.strip() else None
+        if not q:
+            await update.effective_message.reply_text("Ketik angkanya aja ya, mis. 50. Atau /batal.")
+            return
+        context.user_data["awaiting"] = None
+        await _buat_po_stok(context, update.effective_chat.id, [(context.user_data.pop("so_code", ""), float(q))])
+        return
 
     pending_po = context.user_data.get("pending_po")
     other_pending = any(context.user_data.get(k) for k in _PENDING_KEYS if k != "pending_po")
@@ -1729,6 +1737,35 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _kabar_komisi(context.bot, inv)
         return
 
+    if data.startswith("so:") or data.startswith("sa:"):
+        if data.startswith("so:"):
+            _, code, qty = data.split(":", 2)
+            pesanan = [(code, float(qty))]
+        else:
+            pesanan = context.bot_data.get("stok_po", {}).pop(data[3:], None)
+            if not pesanan:
+                await query.edit_message_reply_markup(reply_markup=None)
+                await update.effective_chat.send_message("Tombol ini udah dipakai / kadaluarsa. Cek ulang: /stok")
+                return
+        # cegah dobel: barang yang udah ada PO jalan dilewatin
+        import asyncio
+        jalan = await asyncio.to_thread(_sheets().po_sedang_jalan)
+        dobel = [c for c, _ in pesanan if c.upper() in jalan]
+        pesanan = [(c, q) for c, q in pesanan if c.upper() not in jalan]
+        if dobel:
+            await update.effective_chat.send_message("Udah ada PO jalan buat: " + ", ".join(dobel) + " — dilewatin.")
+        if pesanan:
+            await _buat_po_stok(context, update.effective_chat.id, pesanan)
+        return
+    if data.startswith("sq:"):
+        code = data[3:]
+        p = next((r for r in _sheets().get_price_list() if str(r.get("Item_Code", "")).upper() == code.upper()), None)
+        context.user_data["awaiting"] = "so_qty"
+        context.user_data["so_code"] = code
+        await update.effective_chat.send_message(
+            f"Mau PO {p.get('Nama', code) if p else code} berapa {p.get('Satuan', '') if p else ''}? Ketik angkanya aja (mis. 50). /batal buat batal.")
+        return
+
     if data == "pm_nanti":
         await query.edit_message_reply_markup(reply_markup=None)
         return
@@ -1875,6 +1912,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.exception("gagal mirror order")
         await _kirim_invoice(update, context, no_invoice)
         await _kirim_surat_jalan(update, context, no_invoice)
+        await _cek_stok_setelah_order(context, [i.get("item_code") for i in parsed.get("items", [])])
         if parsed.get("_web"):
             try:
                 img, kpdf = documents.generate_konfirmasi_pesanan(
@@ -2804,6 +2842,87 @@ def _teks_stok_menipis(items):
     return "\n".join(lines)
 
 
+def _pendek(nama, n=22):
+    nama = str(nama)
+    for buang in ("HD Kantong Sampah Hitam ", "Kantong Sampah ", "Kantong "):
+        if nama.startswith(buang) and len(nama) > n:
+            nama = nama[len(buang):]
+    return nama if len(nama) <= n else nama[:n - 1] + "…"
+
+
+async def _kirim_alert_stok(context, saran, judul, mirror=True):
+    """Alert stok dikit + tombol Buat PO (jumlah otomatis: Qty_Order / SAMPAH 125;
+    barang lain lu ketik jumlahnya). Tombol cuma di chat pribadi owner."""
+    import uuid as _uuid
+    saran = sorted(saran, key=lambda i: (i["status"] != "habis", i["nama"]))
+    lines, rows, otomatis = [judul, ""], [], []
+    for i in saran:
+        ic = "🔴" if i["status"] == "habis" else "🟡"
+        s_ = f"{ic} {i['nama']}: sisa {_fmt_stok(i)} (min {i['min']:g})"
+        if i["po_jalan"]:
+            s_ += " — udah ada " + ", ".join(f"{po} (sisa {q:g})" for po, q in i["po_jalan"][:2])
+        elif not i["supplier"]:
+            s_ += " — ⚠️ supplier kosong (/supplier)"
+        elif i["qty_order"] > 0:
+            s_ += f" → PO {i['qty_order']:g} {i['satuan']} ke {i['supplier']}"
+            otomatis.append((i["code"], i["qty_order"]))
+            rows.append([InlineKeyboardButton(f"📝 PO {_pendek(i['nama'])} {i['qty_order']:g}",
+                                              callback_data=f"so:{i['code']}:{i['qty_order']:g}"[:64])])
+        else:
+            s_ += f" → ke {i['supplier']}, jumlah lu yang tentuin"
+            rows.append([InlineKeyboardButton(f"📝 PO {_pendek(i['nama'])} (isi jumlah)",
+                                              callback_data=f"sq:{i['code']}"[:64])])
+        lines.append(s_)
+    if len(otomatis) > 1:
+        key = _uuid.uuid4().hex[:8]
+        context.bot_data.setdefault("stok_po", {})[key] = otomatis
+        rows.insert(0, [InlineKeyboardButton(f"📝 PO SEMUA yang otomatis ({len(otomatis)})", callback_data=f"sa:{key}")])
+    teks = "\n".join(lines)
+    kb = InlineKeyboardMarkup(rows[:12]) if rows else None
+    for chat_id in list(dict.fromkeys(c for c in config.OWNER_TELEGRAM_IDS if c)):
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=teks, reply_markup=kb)
+        except Exception:
+            logger.exception("gagal kirim alert stok ke %s", chat_id)
+    if mirror:
+        try:
+            await _mirror(context.bot, "stok", text=teks)
+        except Exception:
+            logger.exception("gagal mirror alert stok")
+
+
+async def _cek_stok_setelah_order(context, codes):
+    """Abis invoice dibuat: kalau ada barangnya yang jadi menipis/habis -> langsung kabarin
+    (1 barang maks 1x sehari biar gak spam)."""
+    import asyncio
+    try:
+        codes = {str(c).upper() for c in codes if c}
+        if not codes:
+            return
+        saran = await asyncio.to_thread(_sheets().saran_order, codes)
+        hari = _wib_now().strftime("%Y-%m-%d")
+        sudah = context.bot_data.setdefault("stok_alert", set())
+        baru = [i for i in saran if (i["code"].upper(), hari) not in sudah]
+        if not baru:
+            return
+        for i in baru:
+            sudah.add((i["code"].upper(), hari))
+        await _kirim_alert_stok(context, baru, "⚠️ STOK DIKIT abis order barusan:")
+    except Exception:
+        logger.exception("gagal cek stok setelah order")
+
+
+async def _buat_po_stok(context, chat, pesanan):
+    import asyncio
+    hasil, gagal = await asyncio.to_thread(_sheets().buat_po_barang, pesanan)
+    teks = [f"✅ {h['no_po']} → {h['supplier']} ({rupiah(h['total'])})" for h in hasil]
+    if gagal:
+        teks += ["⚠️ Gak bisa:"] + [f"• {g['nama']} — {g['alasan']}" for g in gagal]
+    await context.bot.send_message(chat_id=chat, text="\n".join(teks) or "Gak ada yang diproses.")
+    for h in hasil:
+        await _kirim_po_otomatis(context.bot, h)
+
+
 async def stok_job(context: ContextTypes.DEFAULT_TYPE):
     """Tiap hari (>= jam 08 WIB): kabarin barang yang stoknya menipis/habis."""
     now = _wib_now()
@@ -2814,17 +2933,11 @@ async def stok_job(context: ContextTypes.DEFAULT_TYPE):
         sheets = _sheets()
         if any(str(r.get("Ref", "")) == ref for r in sheets._reminder_records()):
             return
-        teks = _teks_stok_menipis(sheets.get_stok_all())
+        saran = sheets.saran_order()
         rid = sheets.add_reminder("stok", ref, "Cek Stok", 0, now.date(), "Alert stok harian")
         sheets.update_reminder(rid, Status="Selesai")
-        if not teks:
-            return
-        for chat_id in [c for c in config.OWNER_TELEGRAM_IDS if c]:
-            try:
-                await context.bot.send_message(chat_id=chat_id, text=teks)
-            except Exception:
-                logger.exception("gagal kirim alert stok ke %s", chat_id)
-        await _mirror(context.bot, "stok", text=teks)
+        if saran:
+            await _kirim_alert_stok(context, saran, "📦 STOK MENIPIS — waktunya order:")
     except Exception:
         logger.exception("gagal cek stok harian")
 
@@ -2842,11 +2955,13 @@ async def stok_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                  f"{i['nama']}: {_fmt_stok(i) if i['stok'] is not None else 'belum dihitung'}" for i in items[:30]]
         await update.effective_message.reply_text("\n".join(lines))
         return
-    teks = _teks_stok_menipis(items)
     belum = sum(1 for i in items if i["status"] == "belum")
+    saran = _sheets().saran_order()
+    if saran:
+        await _kirim_alert_stok(context, saran, "📦 STOK MENIPIS:", mirror=False)
     await update.effective_message.reply_text(
-        (teks or "✅ Gak ada stok yang menipis.") + (f"\n\n⚪ {belum} barang belum dihitung stoknya." if belum else "")
-        + "\n\nCek barang tertentu: /stok <nama>")
+        ("" if saran else "✅ Gak ada stok yang menipis.") + (f"\n⚪ {belum} barang belum dihitung stoknya." if belum else "")
+        + "\nCek barang tertentu: /stok <nama>")
 
 
 async def _kirim_link_akses(update, peran, judul, path):

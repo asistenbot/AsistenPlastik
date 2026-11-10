@@ -124,7 +124,10 @@ def _party_lines(nama, no_hp, alamat, metode, no_po, tgl_kirim):
         out.append("         " + extra)
     m = "Metode : " + str(metode or "-")
     if tgl_kirim:
-        m = m.ljust(34) + "Tgl Kirim : " + str(tgl_kirim)
+        tk = str(tgl_kirim).strip()
+        if len(tk) == 10 and tk[4] == "-" and tk[7] == "-":
+            tk = f"{tk[8:10]}-{tk[5:7]}-{tk[:4]}"
+        m = m.ljust(34) + "Tgl Kirim : " + tk
     out.append(m)
     if no_po:
         out.append("No. PO : " + str(no_po)[:66])

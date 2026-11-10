@@ -789,6 +789,22 @@ class SheetsClient:
         ws.batch_update(data, value_input_option="RAW")
         return True
 
+    def set_tgl_kirim_invoice(self, no_invoice, tgl):
+        """Ganti (atau kosongin) Tanggal_Kirim semua baris 1 invoice."""
+        from gspread.utils import rowcol_to_a1
+        ws = self._ws(config.SHEET_ORDERS)
+        values = ws.get_all_values()
+        if not values or "Tanggal_Kirim" not in values[0]:
+            return False
+        h = values[0]
+        ci, ct = h.index("No_Invoice"), h.index("Tanggal_Kirim")
+        rows = [i for i, r in enumerate(values[1:], start=2) if len(r) > ci and r[ci] == no_invoice]
+        if not rows:
+            return False
+        ws.batch_update([{"range": rowcol_to_a1(i, ct + 1), "values": [[tgl or ""]]} for i in rows],
+                        value_input_option="RAW")
+        return True
+
     def get_order_items(self, no_invoice):
         return [r for r in self.get_all_orders() if str(r.get("No_Invoice", "")) == no_invoice]
 

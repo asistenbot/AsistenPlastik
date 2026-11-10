@@ -1,5 +1,6 @@
 """Halaman stok gudang (input pegawai) + dashboard stok (owner)."""
 
+import datetime
 import asyncio
 import html
 import json
@@ -459,10 +460,25 @@ def add_stok_routes(app, sheets_getter, notify=None):
         sheets = sheets_getter()
         if request.method == "GET":
             rows = await asyncio.to_thread(sheets.get_order_items, request.query.get("inv", "")[:40])
-            return web.json_response({"ok": bool(rows), "catatan": str((rows[0] if rows else {}).get("Catatan", "") or "")})
+            f0 = rows[0] if rows else {}
+            return web.json_response({"ok": bool(rows), "catatan": str(f0.get("Catatan", "") or ""),
+                                      "tgl_kirim": str(f0.get("Tanggal_Kirim", "") or "")})
         b = await request.json()
         ok = await asyncio.to_thread(sheets.set_catatan_invoice, str(b.get("invoice", ""))[:40],
                                      " ".join(str(b.get("catatan", "") or "").split())[:200])
+        return web.json_response({"ok": bool(ok)})
+
+    async def tgl_kirim(request):
+        if not await _link(request, ("@owner",)):
+            return web.json_response({"ok": False}, status=404)
+        b = await request.json()
+        tgl = str(b.get("tgl", "") or "").strip()[:10]
+        if tgl:
+            try:
+                datetime.datetime.strptime(tgl, "%Y-%m-%d")
+            except ValueError:
+                return web.json_response({"ok": False, "error": "Tanggal gak valid"})
+        ok = await asyncio.to_thread(sheets_getter().set_tgl_kirim_invoice, str(b.get("invoice", ""))[:40], tgl)
         return web.json_response({"ok": bool(ok)})
 
     async def tutup_po(request):
@@ -596,6 +612,7 @@ def add_stok_routes(app, sheets_getter, notify=None):
     app.router.add_post("/dashboard/{token}/buatinvoice", buat_invoice)
     app.router.add_get("/dashboard/{token}/catatan", catatan_inv)
     app.router.add_post("/dashboard/{token}/catatan", catatan_inv)
+    app.router.add_post("/dashboard/{token}/tglkirim", tgl_kirim)
     app.router.add_post("/dashboard/{token}/bayarkomisi", bayar_komisi)
     app.router.add_post("/dashboard/{token}/kirim", tandai_kirim)
     app.router.add_get("/dashboard/{token}/struk/{inv}", struk)

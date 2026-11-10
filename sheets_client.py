@@ -1421,6 +1421,27 @@ class SheetsClient:
                 return True
         return False
 
+    def set_supplier_produk(self, codes, supplier):
+        """Isi kolom Supplier di PriceList buat banyak kode sekaligus (1x tulis)."""
+        from gspread.utils import rowcol_to_a1
+        ws = self._ws(config.SHEET_PRICELIST)
+        values = ws.get_all_values()
+        h = values[0]
+        if "Supplier" not in h:
+            return 0
+        c_code, c_sup = h.index("Item_Code"), h.index("Supplier")
+        want = {str(c).strip().upper() for c in codes}
+        data = [{"range": rowcol_to_a1(i, c_sup + 1), "values": [[supplier]]}
+                for i, row in enumerate(values[1:], start=2)
+                if len(row) > c_code and row[c_code].strip().upper() in want]
+        if data:
+            ws.batch_update(data)
+        try:
+            self.add_supplier_if_new(supplier)
+        except Exception:
+            pass
+        return len(data)
+
     # ---------------- STAFF GUDANG ----------------
 
     @staticmethod
@@ -1561,13 +1582,27 @@ class SheetsClient:
                                             "ref": r.get("Ref", ""), "items": []})
             b["items"].append({"code": r.get("Item_Code", ""), "nama": r.get("Nama", ""), "qty": r.get("Qty", ""),
                                "satuan": r.get("Satuan", "")})
+        real = self._batch_udah_real()
+        for b in by.values():
+            b["sudah_real"] = real.get(b["batch"], "")
         return sorted(by.values(), key=lambda b: b["waktu"], reverse=True)
 
+    def _batch_udah_real(self):
+        """{batch: waktu} buat batch yang udah pernah 'Dijadiin stok real'."""
+        out = {}
+        for m in self._records(self._ws(config.SHEET_MUTASI)):
+            if m.get("Jenis") == "Hitung" and str(m.get("Catatan", "")).startswith("Dijadiin stok real dari "):
+                out[str(m.get("Ref", ""))] = str(m.get("Waktu", ""))
+        return out
+
     def jadikan_stok_real(self, batch, oleh="owner (dashboard)"):
-        """Angka di 1 batch yang udah disetujui dijadiin STOK REAL sekarang (Hitung)."""
+        """Angka di 1 batch yang udah disetujui dijadiin STOK REAL sekarang (Hitung).
+        Balikin jumlah barang, 0 kalau batch gak ada, -1 kalau udah pernah."""
         rows = [r for r in self.get_pengajuan("Disetujui") if r.get("Batch") == batch]
         if not rows:
             return 0
+        if batch in self._batch_udah_real():
+            return -1
         self.add_mutasi([{"item_code": r["Item_Code"], "nama": r.get("Nama", ""), "jenis": "Hitung", "qty": r.get("Qty"),
                           "satuan": r.get("Satuan", ""), "ref": batch, "catatan": f"Dijadiin stok real dari {batch}",
                           "oleh": oleh} for r in rows])
@@ -1916,7 +1951,9 @@ class SheetsClient:
                 sup = str((p or {}).get("Supplier", "") or "").strip()
                 hb = self._f((p or {}).get("Harga_Beli"))
                 if not p or not sup or hb <= 0:
-                    gagal.append({"id": r.get("ID"), "nama": r.get("Nama", ""),
+                    gagal.append({"id": r.get("ID"), "nama": r.get("Nama", ""), "code": str(r.get("Item_Code", "")),
+                              "kategori": str((p or {}).get("Kategori", "")),
+                              "kurang": "supplier" if p and not sup else "harga" if p else "produk",
                                   "alasan": "Supplier kosong di PriceList" if p and not sup else
                                   "Harga beli kosong di PriceList" if p else "Barang gak ada di PriceList"})
                     continue

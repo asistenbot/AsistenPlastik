@@ -327,6 +327,7 @@ Command di bawah ini cadangan aja kalau mau lebih pasti/cepat:
 /dokumen <no invoice atau nama customer> — cetak ulang invoice + surat jalan
 (kalau customer punya banyak invoice, bot kasih daftar buat dipilih)
 /lunas <no invoice atau nama customer> — tandai order sudah dibayar
+/supplier <barang/kategori> ke <supplier> — isi supplier di PriceList (buat PO otomatis)
 /komisi — komisi jalur belakang per customer (rahasia, chat pribadi)
 /cekharga <customer/supplier/barang> — LIHAT harga (mis. /cekharga baso yen, /cekharga hippe)
 /harga <kategori/nama> <harga> [beli] — ubah harga banyak produk sekaligus (ada preview)
@@ -1742,7 +1743,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         teks = [f"✅ {h['no_po']} → {h['supplier']} ({rupiah(h['total'])})" for h in hasil]
         if gagal:
             teks += ["", "⚠️ Belum bisa dibikinin PO:"] + [f"• {g['nama']} — {g['alasan']}" for g in gagal] + \
-                    ["Lengkapi kolom Supplier / Harga_Beli di PriceList, terus klik Buat PO di dashboard (tab Gudang)."]
+                    ["Isi supplier-nya: /supplier <kategori/nama barang> ke <supplier> (mis. /supplier sampah ke CSB),",
+                     "terus klik 📝 Buat PO lagi di sini atau di dashboard."]
         await query.edit_message_text("\n".join(teks) or "Gak ada yang diproses.")
         for h in hasil:
             await _kirim_po_otomatis(context.bot, h)
@@ -2603,6 +2605,31 @@ async def _kabar_komisi(bot, inv):
 
 
 @owner_only
+async def supplier_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/supplier <kategori / nama barang> ke <nama supplier> -> isi kolom Supplier PriceList."""
+    import asyncio
+    import re as _re
+    teks = " ".join(context.args or [])
+    m = _re.match(r"(.+?)\s+(?:ke|=|->|dari)\s+(.+)$", teks, _re.I)
+    if not m:
+        await update.effective_message.reply_text(
+            "Format: /supplier <kategori / nama barang> ke <nama supplier>\n"
+            "Contoh:\n/supplier sampah ke CSB\n/supplier tulip ke CSB\n/supplier hippe ke Hippe")
+        return
+    q, sup = m.group(1).strip(), m.group(2).strip()
+    sheets = _sheets()
+    cara, rows = await asyncio.to_thread(sheets.cari_produk_massal, q)
+    if not rows:
+        await update.effective_message.reply_text(f"Gak ada barang yang cocok sama '{q}'.")
+        return
+    n = await asyncio.to_thread(sheets.set_supplier_produk, [r["Item_Code"] for r in rows], sup)
+    contoh = "\n".join(f"• {r.get('Nama', '')}" for r in rows[:15])
+    await update.effective_message.reply_text(
+        f"✅ Supplier {n} barang ({cara} '{q}') jadi {sup}:\n{contoh}" + (f"\n... dan {len(rows) - 15} lagi" if len(rows) > 15 else "")
+        + "\n\nSekarang tombol Buat PO udah bisa dipakai buat barang-barang ini.")
+
+
+@owner_only
 async def komisi_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/komisi -> daftar; /komisi <customer> <rp per satuan> [penerima] -> pasang/ubah; rp 0 -> hapus."""
     import re as _re
@@ -3051,6 +3078,7 @@ def main():
     app.add_handler(CommandHandler("hargakategori", hargakategori_cmd))
     app.add_handler(CommandHandler("cekharga", cekharga_cmd))
     app.add_handler(CommandHandler("komisi", komisi_cmd))
+    app.add_handler(CommandHandler("supplier", supplier_cmd))
     app.add_handler(CommandHandler("importgrandia", importgrandia_cmd))
     app.add_error_handler(error_handler)
     app.add_handler(CommandHandler("lunas", lunas_cmd))

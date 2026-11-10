@@ -376,8 +376,31 @@ def add_stok_routes(app, sheets_getter, notify=None):
         if not await _link(request, ("@owner",)):
             return web.json_response({"ok": False}, status=404)
         n = await asyncio.to_thread(sheets_getter().jadikan_stok_real, str((await request.json()).get("batch", "")))
-        return web.json_response({"ok": n > 0, "n": n})
+        return web.json_response({"ok": n > 0, "n": n, "error": "Udah pernah dijadiin stok real" if n == -1 else ""})
 
+    async def setsupplier(request):
+        if not await _link(request, ("@owner",)):
+            return web.json_response({"ok": False}, status=404)
+        body = await request.json()
+        sup = str(body.get("supplier", "")).strip()[:60]
+        codes = [str(c)[:40] for c in (body.get("codes") or [])][:500]
+        kat = str(body.get("kategori", "")).strip()
+        sheets = sheets_getter()
+        if kat:   # sekalian semua barang satu kategori
+            codes += [str(p["Item_Code"]) for p in await asyncio.to_thread(sheets.get_price_list)
+                      if str(p.get("Kategori", "")).strip().lower() == kat.lower() and not str(p.get("Supplier", "")).strip()]
+        if not sup or not codes:
+            return web.json_response({"ok": False, "error": "Supplier / barang kosong"}, status=400)
+        n = await asyncio.to_thread(sheets.set_supplier_produk, codes, sup)
+        return web.json_response({"ok": True, "n": n})
+
+    async def suppliers(request):
+        if not await _link(request, ("@owner",)):
+            return web.json_response({"ok": False}, status=404)
+        return web.json_response({"ok": True, "suppliers": await asyncio.to_thread(sheets_getter().get_supplier_names)})
+
+    app.router.add_post("/dashboard/{token}/setsupplier", setsupplier)
+    app.router.add_get("/dashboard/{token}/suppliers", suppliers)
     app.router.add_post("/dashboard/{token}/setstok", setstok)
     app.router.add_post("/dashboard/{token}/jadihitung", jadihitung)
     app.router.add_post("/dashboard/{token}/popermintaan", po_permintaan)

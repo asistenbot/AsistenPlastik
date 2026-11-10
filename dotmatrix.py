@@ -425,13 +425,14 @@ def generate_invoice_dotmatrix(no_invoice, nama_customer, no_hp, alamat, metode,
         return [_hl("-"),
                 tot("Subtotal", sub), tot("Ongkir", ongkir), tot("TOTAL", sub + ongkir),
                 _hl("="),
-                *_catatan_lines(catatan),
+                *(_catatan_lines(catatan) + [""] if catatan and str(catatan).strip() else []),
                 f"Transfer : {config.BANK_NAME} {config.BANK_ACCOUNT_NUMBER} a.n. {config.BANK_ACCOUNT_NAME}",
+                "",
                 "Terima kasih atas kepercayaan Anda."]
 
     party = _party_lines(nama_customer, no_hp, alamat, metode, no_po_customer, tanggal_kirim)
     pages = _build("INVOICE", no_invoice, "Tgl : " + _tgl_label(tanggal),
-                   party, widths, aligns, head, groups, footer, 7 + len(_catatan_lines(catatan)))
+                   party, widths, aligns, head, groups, footer, len(footer(widths, 0)))
     return _finish(pages)
 
 
@@ -447,8 +448,10 @@ def generate_surat_jalan_dotmatrix(no_surat_jalan, nama_customer, no_hp, alamat,
     def footer(widths_, _n):
         return [_hl("-"),
                 f"Total jenis barang : {n_items}",
-                *_catatan_lines(catatan),
+                "",
+                *(_catatan_lines(catatan) + [""] if catatan and str(catatan).strip() else []),
                 "Mohon periksa jumlah dan kondisi barang saat diterima.",
+                "",
                 "Dikirim oleh,".ljust(22) + " " * 34 + "Diterima oleh,".ljust(24),
                 "", "",
                 "(____________________)".ljust(22) + " " * 34 + "(____________________)"]
@@ -457,5 +460,5 @@ def generate_surat_jalan_dotmatrix(no_surat_jalan, nama_customer, no_hp, alamat,
     ref = (f"Ref : {no_invoice_ref}   " if no_invoice_ref else "") + f"Tgl : {tgl}"
     party = _party_lines(nama_customer, no_hp, alamat, metode, no_po_customer, tanggal_kirim)
     pages = _build("SURAT JALAN", no_surat_jalan, ref, party, widths, aligns, head,
-                   groups, footer, 7 + len(_catatan_lines(catatan)))
+                   groups, footer, len(footer(widths, 0)))
     return _finish(pages)

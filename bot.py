@@ -1766,6 +1766,29 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Mau PO {p.get('Nama', code) if p else code} berapa {p.get('Satuan', '') if p else ''}? Ketik angkanya aja (mis. 50). /batal buat batal.")
         return
 
+    if data in ("bd_ok", "bd_no"):
+        if data == "bd_no":
+            await query.edit_message_text("Oke, gak dihapus.")
+            return
+        import asyncio
+        rows = await asyncio.to_thread(_sheets().hapus_penyesuaian_salah)
+        await query.edit_message_text(f"🧹 {len(rows)} catatan utang yang salah udah dihapus "
+                                      f"({rupiah(sum(r['jumlah'] for r in rows))})." if rows else "Udah bersih.")
+        return
+    if data.startswith("pmk:"):
+        ids = context.bot_data.get("minta_po", {}).pop(data[4:], None)
+        if not ids:
+            await query.edit_message_text("Tombol udah kadaluarsa. Buka dashboard tab Gudang → Buat PO.")
+            return
+        import asyncio
+        hasil, gagal = await asyncio.to_thread(_sheets().buat_po_dari_permintaan, ids)
+        teks = [f"✅ {h['no_po']} → {h['supplier']} ({rupiah(h['total'])})" for h in hasil]
+        if gagal:
+            teks += ["⚠️ Belum bisa:"] + [f"• {g['nama']} — {g['alasan']}" for g in gagal]
+        await query.edit_message_text("\n".join(teks) or "Gak ada yang diproses (udah dibikin PO).")
+        for h in hasil:
+            await _kirim_po_otomatis(context.bot, h)
+        return
     if data == "pm_nanti":
         await query.edit_message_reply_markup(reply_markup=None)
         return
@@ -2660,11 +2683,36 @@ async def supplier_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not rows:
         await update.effective_message.reply_text(f"Gak ada barang yang cocok sama '{q}'.")
         return
+    sup = await asyncio.to_thread(sheets.nama_supplier_baku, sup)
     n = await asyncio.to_thread(sheets.set_supplier_produk, [r["Item_Code"] for r in rows], sup)
     contoh = "\n".join(f"• {r.get('Nama', '')}" for r in rows[:15])
+    nunggu = await asyncio.to_thread(sheets.permintaan_nunggu_po, [r["Item_Code"] for r in rows])
+    kb = None
+    if nunggu:
+        key = __import__("uuid").uuid4().hex[:8]
+        context.bot_data.setdefault("minta_po", {})[key] = [str(r["ID"]) for r in nunggu]
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"📝 Buat PO sekarang ({len(nunggu)} permintaan)",
+                                                         callback_data=f"pmk:{key}")]])
     await update.effective_message.reply_text(
         f"✅ Supplier {n} barang ({cara} '{q}') jadi {sup}:\n{contoh}" + (f"\n... dan {len(rows) - 15} lagi" if len(rows) > 15 else "")
-        + "\n\nSekarang tombol Buat PO udah bisa dipakai buat barang-barang ini.")
+        + ("\n\n🛒 Ada permintaan barang dari gudang yang nunggu PO:\n" +
+           "\n".join(f"• {r.get('Nama')}: {r.get('Qty')} {r.get('Satuan')}" for r in nunggu[:10]) if nunggu
+           else "\n\nSekarang tombol Buat PO udah bisa dipakai buat barang-barang ini."), reply_markup=kb)
+
+
+@owner_only
+async def bersihindobel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    import asyncio
+    rows = await asyncio.to_thread(_sheets().cari_penyesuaian_salah)
+    if not rows:
+        await update.effective_message.reply_text("✅ Gak ada catatan utang dobel yang perlu dibersihin.")
+        return
+    lines = ["🧹 Catatan 'Penyesuaian' utang yang SALAH (PO lama ke-input ulang):", ""]
+    lines += [f"• {r['tgl']} {r['supplier']} {r['po']}: {rupiah(r['jumlah'])}" for r in rows]
+    lines += ["", f"Total {rupiah(sum(r['jumlah'] for r in rows))} bakal dihapus dari utang supplier."]
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Hapus", callback_data="bd_ok"),
+                                InlineKeyboardButton("❌ Batal", callback_data="bd_no")]])
+    await update.effective_message.reply_text("\n".join(lines), reply_markup=kb)
 
 
 @owner_only
@@ -3194,6 +3242,7 @@ def main():
     app.add_handler(CommandHandler("cekharga", cekharga_cmd))
     app.add_handler(CommandHandler("komisi", komisi_cmd))
     app.add_handler(CommandHandler("supplier", supplier_cmd))
+    app.add_handler(CommandHandler("bersihindobel", bersihindobel_cmd))
     app.add_handler(CommandHandler("importgrandia", importgrandia_cmd))
     app.add_error_handler(error_handler)
     app.add_handler(CommandHandler("lunas", lunas_cmd))

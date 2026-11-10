@@ -1073,11 +1073,37 @@ class SheetsClient:
     def get_all_pos(self):
         return self._records(self._ws(config.SHEET_PURCHASE_ORDERS))
 
+    def nama_supplier_baku(self, nama):
+        """'csb' / 'Csb' / 'CSB' / alias di PengaturanTagihan -> 1 nama baku
+        (yang ada di tab Suppliers), biar PO & utang gak kepisah."""
+        nama = (nama or "").strip()
+        if not nama:
+            return nama
+        try:
+            daftar = self.get_supplier_names()
+        except Exception:
+            return nama
+        by = {_norm(n): n for n in daftar if n}
+        if _norm(nama) in by:
+            return by[_norm(nama)]
+        try:
+            for r in self._records(self._ws(config.SHEET_TAGIHAN)):
+                ks = [str(r.get("Nama", ""))] + [a for a in str(r.get("Alias", "")).split(",") if a.strip()]
+                if _norm(nama) in {_norm(k) for k in ks}:
+                    for k in ks:
+                        if _norm(k) in by:
+                            return by[_norm(k)]
+                    return str(r.get("Nama", "")).strip() or nama
+        except Exception:
+            pass
+        return nama
+
     def add_purchase_order(self, nama_supplier, items):
         """items: list of dict {nama_item, qty, satuan, harga_satuan}.
         Nulis 1 baris per item dgn No_PO yang sama, status Belum Lunas,
         dan otomatis nambah entry 'Utang Baru' ke UtangSupplier.
         Balikin (no_po, total)."""
+        nama_supplier = self.nama_supplier_baku(nama_supplier)
         with self._lock:
             no_po = self.next_po_number()
             ts = _now_str()
@@ -1187,8 +1213,10 @@ class SheetsClient:
 
     def _get_saldo_utang(self, nama_supplier):
         total = 0.0
+        kunci = {_norm(nama_supplier), _norm(self.nama_supplier_baku(nama_supplier))}
         for r in self._records(self._ws(config.SHEET_UTANG_SUPPLIER)):
-            if str(r.get("Nama_Supplier", "")).strip().lower() != nama_supplier.strip().lower():
+            n = str(r.get("Nama_Supplier", "")).strip()
+            if _norm(n) not in kunci and _norm(self.nama_supplier_baku(n)) not in kunci:
                 continue
             try:
                 jumlah = float(r.get("Jumlah", 0) or 0)
@@ -1213,17 +1241,20 @@ class SheetsClient:
 
     def bayar_utang(self, nama_supplier, jumlah, catatan=""):
         """Catat pembayaran ke supplier. Balikin sisa utang setelah dibayar."""
+        nama_supplier = self.nama_supplier_baku(nama_supplier)
         with self._lock:
             saldo_baru = self._add_utang_entry(nama_supplier, "", "Pembayaran", jumlah, catatan)
         return saldo_baru
 
     def get_utang_summary(self):
         """dict nama_supplier -> sisa utang (cuma yang > 0)"""
-        names = set()
+        names = {}
         for r in self._records(self._ws(config.SHEET_UTANG_SUPPLIER)):
             nama = str(r.get("Nama_Supplier", "")).strip()
             if nama:
-                names.add(nama)
+                baku = self.nama_supplier_baku(nama)
+                names.setdefault(_norm(baku), baku)
+        names = list(names.values())
         out = {}
         for nama in names:
             saldo = self._get_saldo_utang(nama)
@@ -1439,6 +1470,7 @@ class SheetsClient:
     def set_supplier_produk(self, codes, supplier):
         """Isi kolom Supplier di PriceList buat banyak kode sekaligus (1x tulis)."""
         from gspread.utils import rowcol_to_a1
+        supplier = self.nama_supplier_baku(supplier)
         ws = self._ws(config.SHEET_PRICELIST)
         values = ws.get_all_values()
         h = values[0]
@@ -1851,6 +1883,37 @@ class SheetsClient:
             logger.exception("gagal sesuaikan utang %s", no_po)
             return 0.0
 
+    def cari_penyesuaian_salah(self):
+        """Catatan 'Penyesuaian' utang buat PO LAMA (sebelum TERIMA_PO_SEJAK) -- itu
+        muncul gara-gara PO lama ke-input ulang di Terima PO, bukan barang beneran lebih."""
+        sejak = getattr(config, "TERIMA_PO_SEJAK", "")
+        tgl_po = {}
+        for r in self.get_all_pos():
+            tgl_po.setdefault(str(r.get("No_PO", "")), str(r.get("Timestamp", ""))[:10])
+        ws = self._ws(config.SHEET_UTANG_SUPPLIER)
+        values = ws.get_all_values()
+        h = values[0] if values else []
+        if "Jenis" not in h:
+            return []
+        cj, cp, cn, cm = h.index("Jenis"), h.index("No_PO"), h.index("Nama_Supplier"), h.index("Jumlah")
+        out = []
+        for i, row in enumerate(values[1:], start=2):
+            if len(row) > cj and row[cj] == "Penyesuaian":
+                po = row[cp]
+                if sejak and tgl_po.get(po, "9999") < sejak:
+                    out.append({"baris": i, "po": po, "supplier": row[cn], "jumlah": self._f(row[cm]),
+                                "tgl": row[0]})
+        return out
+
+    def hapus_penyesuaian_salah(self):
+        """Hapus catatan dari cari_penyesuaian_salah() (dari bawah biar nomor baris gak geser)."""
+        with self._lock:
+            rows = self.cari_penyesuaian_salah()
+            ws = self._ws(config.SHEET_UTANG_SUPPLIER)
+            for r in sorted(rows, key=lambda r: -r["baris"]):
+                ws.delete_rows(r["baris"])
+            return rows
+
     def penyesuaian_po(self, no_po):
         """Total penyesuaian utang (bertanda) yang udah dicatat buat PO ini."""
         tot = 0.0
@@ -2076,6 +2139,13 @@ class SheetsClient:
                     continue
                 per_sup.setdefault(sup, []).append((None, p, hb, qty))
             return self._po_per_supplier(per_sup), gagal
+
+    def permintaan_nunggu_po(self, codes=None):
+        """Permintaan (Baru / Selesai tanpa PO) -- opsional cuma buat kode tertentu."""
+        want = {str(c).upper() for c in codes} if codes else None
+        return [r for r in self.get_permintaan(None, None, 1000)
+                if r.get("Status") in ("Baru", "Selesai")
+                and (want is None or str(r.get("Item_Code", "")).upper() in want)]
 
     def permintaan_satu_kiriman(self, pid):
         """Semua ID permintaan (status Baru) yang dikirim barengan sama `pid`."""

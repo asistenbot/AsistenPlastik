@@ -42,31 +42,52 @@ def _read_cookie(request):
 
 
 STAFF_HTML = """<!doctype html><html lang="id"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Panel Gudang</title><link rel="manifest" href="/staff/manifest.json"><meta name="theme-color" content="#0f7b6c"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Gudang"><link rel="apple-touch-icon" href="/staff/icon-192.png"><style>
-:root{--g:#0f7b6c;--bg:#f4f7f6;--ink:#1c2b28;--mu:#6b7c78;--ln:#dbe4e1}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,sans-serif}
-header{background:var(--g);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px}header h1{margin:0;font-size:18px;flex:1}
-header button{background:rgba(255,255,255,.2);color:#fff;border:0;border-radius:8px;padding:6px 10px}
-.tabs{display:flex;background:#fff;border-bottom:1px solid var(--ln);position:sticky;top:0;z-index:5;overflow-x:auto}
-.tabs button{flex:0 0 auto;padding:11px 12px;border:0;background:none;font-size:14px;font-weight:600;color:var(--mu);border-bottom:3px solid transparent;white-space:nowrap}
-.tabs button.on{color:var(--g);border-color:var(--g)}
-main{max-width:720px;margin:0 auto;padding:10px 12px 120px}
-.login{max-width:360px;margin:60px auto;background:#fff;border:1px solid var(--ln);border-radius:14px;padding:22px}
-.login h2{margin:0 0 14px;color:var(--g)}
-input,select,textarea{width:100%;padding:11px;border:1px solid var(--ln);border-radius:8px;font:inherit;background:#fff;margin:5px 0}
-.btn{background:var(--g);color:#fff;border:0;border-radius:10px;padding:13px 18px;font-size:16px;font-weight:600;width:100%}
-.btn:disabled{opacity:.5}.btn.sm{width:auto;padding:9px 14px;font-size:14px}
-.card{background:#fff;border:1px solid var(--ln);border-radius:12px;padding:11px 13px;margin:9px 0}
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Panel Gudang</title><link rel="manifest" href="/staff/manifest.json"><meta name="theme-color" content="#070B14"><meta name="color-scheme" content="dark"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap" rel="stylesheet"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Gudang"><link rel="apple-touch-icon" href="/staff/icon-192.png"><style>
+:root{--bg:#070B14;--sf:rgba(255,255,255,.045);--sf2:rgba(255,255,255,.08);--ln:rgba(255,255,255,.09);--ln2:rgba(255,255,255,.16);
+--tx:#E9EEF7;--ink:#E9EEF7;--mu:#8A97AD;--cy:#5CE1FF;--g:#5CE1FF;--ok:#3DDC97;--amb:#FFB547;--red:#FF5D73;
+--iri:linear-gradient(115deg,#5CE1FF 0%,#A78BFA 45%,#FF7AC6 75%,#FFD27A 100%)}
+*{box-sizing:border-box}html{background:var(--bg)}
+body{margin:0;min-height:100vh;color:var(--tx);font:16px/1.5 'Sora',system-ui,sans-serif;font-variant-numeric:tabular-nums;
+background:radial-gradient(900px 500px at 100% -10%,rgba(167,139,250,.16),transparent 60%),radial-gradient(700px 400px at -10% 0%,rgba(92,225,255,.12),transparent 60%),var(--bg);background-attachment:fixed}
+button,input,select,textarea{font-family:inherit}:focus-visible{outline:2px solid var(--cy);outline-offset:2px}
+header{padding:14px 16px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--ln);background:rgba(7,11,20,.65);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+header h1{margin:0;font-size:17px;font-weight:700;flex:1;display:flex;align-items:center;gap:10px;letter-spacing:-.3px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+header h1::before{content:"";width:30px;height:30px;border-radius:10px;background:var(--iri);flex:0 0 auto;box-shadow:0 0 18px rgba(167,139,250,.45)}
+header button{-webkit-appearance:none;background:var(--sf);color:var(--tx);border:1px solid var(--ln2);border-radius:10px;padding:7px 11px;font-size:13px;font-weight:600;cursor:pointer}
+.tabs{display:flex;gap:6px;padding:10px 12px;position:sticky;top:0;z-index:5;overflow-x:auto;scrollbar-width:none;background:rgba(7,11,20,.75);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-bottom:1px solid var(--ln)}
+.tabs::-webkit-scrollbar{display:none}
+.tabs button{-webkit-appearance:none;flex:0 0 auto;padding:10px 15px;border:1px solid var(--ln);background:var(--sf);font-size:14px;font-weight:600;color:var(--mu);border-radius:999px;white-space:nowrap;cursor:pointer}
+.tabs button.on{color:#06101E;background:var(--cy);border-color:var(--cy);box-shadow:0 0 18px rgba(92,225,255,.35)}
+main{max-width:720px;margin:0 auto;padding:14px 14px 130px;animation:in .22s ease-out}
+@keyframes in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+h3{font-size:15px;margin:22px 2px 8px}
+.login{position:relative;max-width:380px;margin:12vh auto 0;padding:28px 24px;border-radius:24px;background:linear-gradient(#0D1424,#0D1424) padding-box,var(--iri) border-box;border:1.5px solid transparent;box-shadow:0 30px 80px -30px rgba(167,139,250,.55)}
+.login h2{margin:0 0 4px;font-size:24px;letter-spacing:-.6px;background:var(--iri);-webkit-background-clip:text;background-clip:text;color:transparent;display:inline-block}
+.login label{display:block;font-size:13px;color:var(--mu);margin-top:12px}
+input,select,textarea{width:100%;padding:12px 13px;border:1px solid var(--ln2);border-radius:12px;font:inherit;background:rgba(255,255,255,.05);color:var(--tx);margin:5px 0;color-scheme:dark}
+input::placeholder,textarea::placeholder{color:#5F6C83}input:focus,select:focus,textarea:focus{outline:none;border-color:var(--cy);box-shadow:0 0 0 3px rgba(92,225,255,.18)}
+select option{background:#0D1424;color:var(--tx)}
+.btn{-webkit-appearance:none;background:var(--cy);color:#06101E;border:0;border-radius:14px;padding:14px 18px;font-size:16px;font-weight:700;width:100%;cursor:pointer;transition:box-shadow .15s,transform .1s}
+.btn:hover{box-shadow:0 0 22px rgba(92,225,255,.45)}.btn:active{transform:scale(.98)}
+.btn:disabled{opacity:.45}.btn.sm{width:auto;padding:9px 14px;font-size:14px;border-radius:11px}
+.login .btn,#go{background:var(--iri);color:#0A0F1C;box-shadow:0 10px 30px -10px rgba(167,139,250,.7)}
+.card{background:var(--sf);border:1px solid var(--ln);border-radius:16px;padding:13px 15px;margin:10px 0}
 .card b{display:block}.card small,.mu{color:var(--mu);font-size:13px}
-.info{background:#e7f5f2;border:1px solid #bfe3dc;border-radius:10px;padding:10px 12px;font-size:14px;margin:8px 0}
-.row{display:flex;gap:8px}.row input{flex:1.2;text-align:center;font-size:17px}.row select{flex:1}
-.bar{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--ln);padding:10px 14px;display:flex;gap:10px;align-items:center}
-.bar .t{flex:1;font-size:14px;color:var(--mu)}.bar .btn{width:auto}
-.badge{display:inline-block;font-size:12px;padding:2px 8px;border-radius:10px;margin-left:6px}
-.menipis,.Menunggu,.Baru{background:#fff0c9;color:#7a5a00}.habis,.Ditolak{background:#ffd9d6;color:#9a1b12}.aman,.Disetujui,.Dikirim,.Selesai{background:#d9f3e4;color:#14633a}.belum{background:#e8e8e8;color:#555}
-.it{margin:10px 0;padding-bottom:10px;border-bottom:1px solid var(--ln)}
-.chips{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0}.chip{border:1px solid var(--ln);background:#fff;border-radius:18px;padding:8px 12px;font:inherit;font-size:14px}.chip.on{background:var(--g);color:#fff;border-color:var(--g)}.chip small{opacity:.8}.lnk{background:none;border:0;color:var(--g);padding:4px 0;font:inherit;font-size:13px;text-decoration:underline}
-.hide{display:none}.err{color:#b3261e;font-size:14px;min-height:20px}
+.info{background:rgba(92,225,255,.06);border:1px solid rgba(92,225,255,.22);border-radius:14px;padding:11px 13px;font-size:14px;margin:8px 0;color:#C9D6E8}
+.info b{color:var(--tx)}
+.row{display:flex;gap:8px}.row input{flex:1.2;text-align:center;font-size:18px;font-weight:600}.row select{flex:1}
+.bar{position:fixed;left:0;right:0;bottom:0;padding:12px 14px calc(12px + env(safe-area-inset-bottom));display:flex;gap:10px;align-items:center;background:rgba(7,11,20,.82);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);border-top:1px solid var(--ln)}
+.bar .t{flex:1;font-size:14px;color:var(--mu)}.bar .btn{width:auto;padding:13px 26px}
+.badge{display:inline-block;font-size:11.5px;padding:3px 10px;border-radius:999px;margin-left:6px;font-weight:600;border:1px solid transparent;vertical-align:1px}
+.menipis,.Menunggu,.Baru{background:rgba(255,181,71,.12);color:#FFC977;border-color:rgba(255,181,71,.3)}.habis,.Ditolak{background:rgba(255,93,115,.12);color:#FF8A9B;border-color:rgba(255,93,115,.3)}
+.aman,.Disetujui,.Dikirim,.Selesai{background:rgba(61,220,151,.12);color:#6FE8B3;border-color:rgba(61,220,151,.3)}.belum{background:var(--sf2);color:var(--mu)}
+.it{margin:10px 0;padding-bottom:12px;border-bottom:1px solid var(--ln)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0}.chip{-webkit-appearance:none;border:1px solid var(--ln2);background:var(--sf);color:var(--tx);border-radius:999px;padding:8px 13px;font:inherit;font-size:14px;cursor:pointer}
+.chip.on{background:var(--cy);color:#06101E;border-color:var(--cy)}.chip small{opacity:.75}
+.lnk{background:none;border:0;color:var(--cy);padding:4px 0;font:inherit;font-size:13px;text-decoration:underline;cursor:pointer}
+a{color:var(--cy)}
+.hide{display:none}.err{color:var(--red);font-size:14px;min-height:20px}
+@media(prefers-reduced-motion:reduce){main{animation:none}.btn{transition:none}}
 </style><script src="/thermal.js"></script></head><body>
 <div id="app"></div>
 <script>
@@ -81,7 +102,7 @@ $('p').onkeydown=e=>{if(e.key=='Enter')$('b').click()}}
 function stokTxt(i){if(i.stok===null)return 'belum dihitung';let t=fmt(i.stok)+' '+i.satuan+(i.estimasi?' (sementara, belum ada hitung awal)':'');if(i.isi_bal>0&&i.stok>=i.isi_bal)t+=' (±'+(Math.round(i.stok/i.isi_bal*10)/10)+' bal)';return t}
 async function boot(){const r=await api('data');if(r.status==401){loginView();return}D=r;ME=r.nama;shell()}
 const TABS=[['po','📋 Terima PO'],['pesanan','🚚 Pesanan'],['masuk','📥 Barang Masuk'],['hitung','🧮 Hitung Stok'],['minta','🛒 Minta Barang'],['riwayat','🕘 Riwayat']];
-function shell(){$('app').innerHTML='<header><h1>📦 '+esc(ME)+'</h1><button id="pw">Ganti password</button><button id="out">Keluar</button></header><div class="tabs">'+TABS.map(t=>'<button data-t="'+t[0]+'" class="'+(t[0]==tab?'on':'')+'">'+t[1]+'</button>').join('')+'</div><main id="m"></main><div class="bar hide" id="bar"><div class="t" id="cnt"></div><button class="btn" id="go">Kirim</button></div>';
+function shell(){$('app').innerHTML='<header><h1>'+esc(ME)+'</h1><button id="pw">Ganti password</button><button id="out">Keluar</button></header><div class="tabs">'+TABS.map(t=>'<button data-t="'+t[0]+'" class="'+(t[0]==tab?'on':'')+'">'+t[1]+'</button>').join('')+'</div><main id="m"></main><div class="bar hide" id="bar"><div class="t" id="cnt"></div><button class="btn" id="go">Kirim</button></div>';
 $('out').onclick=async()=>{await api('logout',{});loginView()};
 $('pw').onclick=async()=>{const lama=prompt('Password lama:');if(!lama)return;const baru=prompt('Password baru (minimal 6 karakter):');if(!baru)return;
 const r=await api('ganti',{lama,baru});alert(r.ok?'✅ Password diganti':(r.error||'Gagal'))};
@@ -93,7 +114,7 @@ P.forEach(p=>{const w=p.status_terima=='Menunggu',sb=p.status_terima=='Sebagian'
 m.innerHTML=h+(P.length?'':'<p>Gak ada PO yang perlu dicek 🎉</p>');
 m.querySelectorAll('[data-po]').forEach(b=>b.onclick=()=>{poSel=b.dataset.po;poV={};const p=P.find(x=>x.po==poSel);poOpen={};p.items.forEach((it,i)=>{poV[i]={q:String(it.sisa),code:it.code}});view()});return}
 const p=P.find(x=>x.po==poSel);if(!p){poSel=null;view();return}
-let h='<button class="btn sm" id="bk" style="background:#555;margin-bottom:8px">← Kembali</button><div class="info"><b>'+esc(p.po)+' — '+esc(p.supplier)+'</b><br>Isi jumlah yang <b>DATANG SEKARANG</b> aja. Angka awal = sisa yang belum datang. Kalau baru datang sebagian (misal 1000 dari 5000), <b>ganti angkanya</b>. Isi 0 kalau barang itu belum datang. Sisanya nanti bisa diinput lagi pas datang.</div><button class="btn sm" id="sesuai" style="margin-bottom:6px">Sisa datang semua</button><div id="lst"></div><input id="cat" placeholder="Catatan (misal: 2 bal sobek / kurang kirim)">';
+let h='<button class="btn sm" id="bk" style="background:var(--sf2);color:var(--tx);margin-bottom:8px">← Kembali</button><div class="info"><b>'+esc(p.po)+' — '+esc(p.supplier)+'</b><br>Isi jumlah yang <b>DATANG SEKARANG</b> aja. Angka awal = sisa yang belum datang. Kalau baru datang sebagian (misal 1000 dari 5000), <b>ganti angkanya</b>. Isi 0 kalau barang itu belum datang. Sisanya nanti bisa diinput lagi pas datang.</div><button class="btn sm" id="sesuai" style="margin-bottom:6px">Sisa datang semua</button><div id="lst"></div><input id="cat" placeholder="Catatan (misal: 2 bal sobek / kurang kirim)">';
 m.innerHTML=h;
 const draw=()=>{$('lst').innerHTML=p.items.map((it,i)=>{const v=poV[i];const opts=D.items.map(x=>'<option value="'+esc(x.code)+'"'+(v.code==x.code?' selected':'')+'>'+esc(x.nama)+'</option>').join('');
 const row=D.items.find(x=>x.code==v.code);const unmatched=!v.code;const unit=unitFor(it,v.code)=='bal'?'bal':(row?row.satuan:it.satuan_stok);
@@ -105,7 +126,7 @@ return '<div class="it"><b>'+esc(it.nama)+(unmatched?' <span class="badge Ditola
 const unitFor=(it,code)=>{const x=D.items.find(y=>y.code==code);return(code&&x&&x.isi_bal>0&&String(it.satuan).toLowerCase()=='bal')?'bal':'sat'};
 const nBelum=()=>p.items.filter((it,i)=>!poV[i].code&&parseFloat(String(poV[i].q).replace(',','.'))!=0).length;
 const ok=()=>p.items.every((it,i)=>{const v=poV[i];return v.q!==''&&!isNaN(parseFloat(String(v.q).replace(',','.')))&&(parseFloat(String(v.q).replace(',','.'))==0||v.code)});
-const upd=()=>{const nb=nBelum();$('cnt').innerHTML=nb?'<b style="color:#b3261e">'+nb+' barang belum dipilih</b>':p.items.length+' macam barang';$('go').disabled=!ok()};
+const upd=()=>{const nb=nBelum();$('cnt').innerHTML=nb?'<b style="color:var(--red)">'+nb+' barang belum dipilih</b>':p.items.length+' macam barang';$('go').disabled=!ok()};
 bar.classList.remove('hide');$('go').textContent='Kirim ke owner';draw();
 $('bk').onclick=()=>{poSel=null;view()};$('sesuai').onclick=()=>{p.items.forEach((it,i)=>{poV[i].q=String(it.sisa)});draw();const t=$('sesuai');t.textContent='✓ Diisi sesuai sisa';setTimeout(()=>t.textContent='Sisa datang semua',1500)};
 $('lst').addEventListener('click',e=>{const c=e.target.closest('button');if(!c)return;if(c.dataset.k!==undefined){poV[c.dataset.i].code=c.dataset.k;draw()}else if(c.dataset.o!==undefined){poOpen[c.dataset.o]=true;draw()}});
@@ -115,7 +136,7 @@ $('go').onclick=async()=>{if(!confirm('Kirim hasil cek PO '+p.po+' ke owner?'))r
 $('go').disabled=true;const r=await api('terimapo',{po:p.po,catatan:$('cat').value,entries});
 if(r.ok){alert('✅ Terkirim ke owner, nunggu disetujui');poSel=null;tab='riwayat';await boot()}else{alert(r.error||'Gagal');$('go').disabled=false}};return}
 if(tab=='pesanan'){let h='<div class="info">Pesanan customer yang harus disiapkan. Setelah barang keluar gudang, tekan <b>Sudah dikirim</b>.</div>';
-D.orders.forEach(o=>{h+='<div class="card"><b>'+esc(o.customer)+' <span class="badge '+(o.dikirim?'Dikirim':'Menunggu')+'">'+(o.dikirim?'Dikirim':'Belum dikirim')+'</span></b><small>'+esc(o.invoice)+' • '+esc(o.tgl)+(o.kirim?' • kirim '+esc(o.kirim):'')+' • '+esc(o.metode)+'</small><div style="margin:6px 0">'+o.items.map(i=>'• '+esc(i.nama)+' — <b>'+esc(i.qty)+' '+esc(i.satuan)+'</b>').join('<br>')+'</div>'+(o.alamat?'<small>📍 '+esc(o.alamat)+'</small><br>':'')+(o.dikirim?'<small>oleh '+esc(o.dikirim_oleh)+' • '+esc(o.dikirim_waktu)+'</small>':'<button class="btn sm" data-k="'+esc(o.invoice)+'">✅ Sudah dikirim</button>')+' <a class="btn sm" style="text-decoration:none;display:inline-block;background:#555;color:#fff" target="_blank" rel="noopener" href="/staff/api/dok/'+encodeURIComponent(o.invoice)+'">🖨️ Surat Jalan</a> <a class="btn sm" style="text-decoration:none;display:inline-block;background:#555;color:#fff" href="/staff/api/doktxt/'+encodeURIComponent(o.invoice)+'">📝 SJ teks</a> <button class="btn sm" style="background:#2a6fb5" data-th="'+esc(o.invoice)+'">📠 Thermal 58mm</button></div>'});
+D.orders.forEach(o=>{h+='<div class="card"><b>'+esc(o.customer)+' <span class="badge '+(o.dikirim?'Dikirim':'Menunggu')+'">'+(o.dikirim?'Dikirim':'Belum dikirim')+'</span></b><small>'+esc(o.invoice)+' • '+esc(o.tgl)+(o.kirim?' • kirim '+esc(o.kirim):'')+' • '+esc(o.metode)+'</small><div style="margin:6px 0">'+o.items.map(i=>'• '+esc(i.nama)+' — <b>'+esc(i.qty)+' '+esc(i.satuan)+'</b>').join('<br>')+'</div>'+(o.alamat?'<small>📍 '+esc(o.alamat)+'</small><br>':'')+(o.dikirim?'<small>oleh '+esc(o.dikirim_oleh)+' • '+esc(o.dikirim_waktu)+'</small>':'<button class="btn sm" data-k="'+esc(o.invoice)+'">✅ Sudah dikirim</button>')+' <a class="btn sm" style="text-decoration:none;display:inline-block;background:var(--sf2);color:var(--tx)" target="_blank" rel="noopener" href="/staff/api/dok/'+encodeURIComponent(o.invoice)+'">🖨️ Surat Jalan</a> <a class="btn sm" style="text-decoration:none;display:inline-block;background:var(--sf2);color:var(--tx)" href="/staff/api/doktxt/'+encodeURIComponent(o.invoice)+'">📝 SJ teks</a> <button class="btn sm" style="background:var(--sf2);color:var(--tx);box-shadow:inset 0 0 0 1px var(--ln2)" data-th="'+esc(o.invoice)+'">📠 Thermal 58mm</button></div>'});
 m.innerHTML=(h||'<p>Belum ada pesanan.</p>')+'<p class="mu" style="text-align:center">📠 Thermal: pakai Chrome di Android, printer nyala. <button class="lnk" id="gp">Ganti printer</button></p>';$('gp').onclick=()=>window.gantiPrinterThermal&&gantiPrinterThermal();m.querySelectorAll('[data-th]').forEach(b=>b.onclick=()=>cetakThermal('/staff/api/struk/'+encodeURIComponent(b.dataset.th),b));m.querySelectorAll('[data-k]').forEach(b=>b.onclick=async()=>{if(!confirm('Barang untuk '+b.dataset.k+' sudah keluar & dikirim?'))return;b.disabled=true;const r=await api('kirim',{invoice:b.dataset.k});if(r.ok)boot();else alert(r.error||'Gagal')});return}
 if(tab=='riwayat'){let h='<div class="info">Pengajuan stok kamu. <b>Menunggu</b> = belum disetujui owner.</div>';
 const by={};D.pengajuan.forEach(p=>{(by[p.Batch]=by[p.Batch]||[]).push(p)});Object.keys(by).reverse().forEach(b=>{const L=by[b];h+='<div class="card"><b>'+esc(L[0].Jenis=='Masuk'?'Barang Masuk':'Hitung Stok')+' <span class="badge '+esc(L[0].Status)+'">'+esc(L[0].Status)+'</span></b><small>'+esc(L[0].Waktu)+(L[0].Ref?' • '+esc(L[0].Ref):'')+'</small><div style="margin-top:5px">'+L.map(p=>'• '+esc(p.Nama)+': <b>'+esc(p.Qty)+' '+esc(p.Satuan)+'</b>').join('<br>')+'</div></div>'});
@@ -346,7 +367,7 @@ def add_staff_routes(app, sheets_getter, notify):
         return web.json_response({
             "name": "Panel Gudang " + config.BUSINESS_NAME, "short_name": "Gudang",
             "start_url": "/staff", "scope": "/staff", "display": "standalone",
-            "orientation": "any", "background_color": "#f4f7f6", "theme_color": "#0f7b6c",
+            "orientation": "any", "background_color": "#070B14", "theme_color": "#070B14",
             "icons": [{"src": "/staff/icon-192.png", "sizes": "192x192", "type": "image/png"},
                       {"src": "/staff/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}]},
             content_type="application/manifest+json")
@@ -359,14 +380,29 @@ def add_staff_routes(app, sheets_getter, notify):
             import io
             import os
             from PIL import Image, ImageDraw, ImageFont
-            im = Image.new("RGB", (n, n), (15, 123, 108))
+            stops = [(0, (92, 225, 255)), (.45, (167, 139, 250)), (.75, (255, 122, 198)), (1, (255, 210, 122))]
+
+            def warna(t):
+                for (a, ca), (b, cb) in zip(stops, stops[1:]):
+                    if t <= b:
+                        k = (t - a) / (b - a)
+                        return tuple(int(ca[i] + (cb[i] - ca[i]) * k) for i in range(3))
+                return stops[-1][1]
+            grad = Image.new("RGB", (n, n))
+            px = grad.load()
+            for y in range(n):
+                for x in range(n):
+                    px[x, y] = warna((x + y) / (2 * n - 2))
+            im = Image.new("RGB", (n, n), (7, 11, 20))
+            m = Image.new("L", (n, n), 0)
+            ImageDraw.Draw(m).rounded_rectangle([n * .14, n * .14, n * .86, n * .86], radius=int(n * .2), fill=255)
+            im.paste(grad, (0, 0), m)
             d = ImageDraw.Draw(im)
             f = ImageFont.truetype(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts",
-                                                "DejaVuSans-Bold.ttf"), int(n * 0.36))
+                                                "DejaVuSans-Bold.ttf"), int(n * 0.3))
             t = "AS"
             w = d.textlength(t, font=f)
-            d.text(((n - w) / 2, n * 0.27), t, font=f, fill="white")
-            d.rectangle([n * 0.22, n * 0.72, n * 0.78, n * 0.76], fill="white")
+            d.text(((n - w) / 2, n * 0.33), t, font=f, fill=(10, 15, 28))
             buf = io.BytesIO()
             im.save(buf, "PNG")
             _ikon[n] = buf.getvalue()

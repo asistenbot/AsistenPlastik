@@ -42,48 +42,48 @@ def _read_cookie(request):
 
 
 STAFF_HTML = """<!doctype html><html lang="id"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Panel Gudang</title><link rel="manifest" href="/staff/manifest.json"><meta name="theme-color" content="#070B14"><meta name="color-scheme" content="dark"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap" rel="stylesheet"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Gudang"><link rel="apple-touch-icon" href="/staff/icon-192.png"><style>
-:root{--bg:#070B14;--sf:rgba(255,255,255,.045);--sf2:rgba(255,255,255,.08);--ln:rgba(255,255,255,.09);--ln2:rgba(255,255,255,.16);
---tx:#E9EEF7;--ink:#E9EEF7;--mu:#8A97AD;--cy:#5CE1FF;--g:#5CE1FF;--ok:#3DDC97;--amb:#FFB547;--red:#FF5D73;
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Panel Gudang</title><link rel="manifest" href="/staff/manifest.json"><meta name="theme-color" content="#EEF2F9"><meta name="color-scheme" content="light"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap" rel="stylesheet"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Gudang"><link rel="apple-touch-icon" href="/staff/icon-192.png"><style>
+:root{--bg:#EEF2F9;--sf:rgba(255,255,255,.78);--sf2:#EEF1F8;--ln:rgba(15,25,50,.09);--ln2:rgba(15,25,50,.16);
+--tx:#0B1324;--ink:#0B1324;--mu:#5A6680;--cy:#4C3BFF;--g:#4C3BFF;--ok:#0FA36B;--amb:#D98A00;--red:#E5364F;
 --iri:linear-gradient(115deg,#5CE1FF 0%,#A78BFA 45%,#FF7AC6 75%,#FFD27A 100%)}
 *{box-sizing:border-box}html{background:var(--bg)}
 body{margin:0;min-height:100vh;color:var(--tx);font:16px/1.5 'Sora',system-ui,sans-serif;font-variant-numeric:tabular-nums;
-background:radial-gradient(900px 500px at 100% -10%,rgba(167,139,250,.16),transparent 60%),radial-gradient(700px 400px at -10% 0%,rgba(92,225,255,.12),transparent 60%),var(--bg);background-attachment:fixed}
+background:radial-gradient(900px 500px at 100% -10%,rgba(167,139,250,.22),transparent 60%),radial-gradient(700px 400px at -10% 0%,rgba(92,225,255,.22),transparent 60%),var(--bg);background-attachment:fixed}
 button,input,select,textarea{font-family:inherit}:focus-visible{outline:2px solid var(--cy);outline-offset:2px}
-header{padding:14px 16px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--ln);background:rgba(7,11,20,.65);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+header{padding:14px 16px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--ln);background:rgba(255,255,255,.7);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
 header h1{margin:0;font-size:17px;font-weight:700;flex:1;display:flex;align-items:center;gap:10px;letter-spacing:-.3px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 header h1::before{content:"";width:30px;height:30px;border-radius:10px;background:var(--iri);flex:0 0 auto;box-shadow:0 0 18px rgba(167,139,250,.45)}
 header button{-webkit-appearance:none;background:var(--sf);color:var(--tx);border:1px solid var(--ln2);border-radius:10px;padding:7px 11px;font-size:13px;font-weight:600;cursor:pointer}
-.tabs{display:flex;gap:6px;padding:10px 12px;position:sticky;top:0;z-index:5;overflow-x:auto;scrollbar-width:none;background:rgba(7,11,20,.75);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-bottom:1px solid var(--ln)}
+.tabs{display:flex;gap:6px;padding:10px 12px;position:sticky;top:0;z-index:5;overflow-x:auto;scrollbar-width:none;background:rgba(238,242,249,.8);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-bottom:1px solid var(--ln)}
 .tabs::-webkit-scrollbar{display:none}
 .tabs button{-webkit-appearance:none;flex:0 0 auto;padding:10px 15px;border:1px solid var(--ln);background:var(--sf);font-size:14px;font-weight:600;color:var(--mu);border-radius:999px;white-space:nowrap;cursor:pointer}
-.tabs button.on{color:#06101E;background:var(--cy);border-color:var(--cy);box-shadow:0 0 18px rgba(92,225,255,.35)}
+.tabs button.on{color:#fff;background:var(--cy);border-color:var(--cy);box-shadow:0 0 18px rgba(76,59,255,.3)}
 main{max-width:720px;margin:0 auto;padding:14px 14px 130px;animation:in .22s ease-out}
 @keyframes in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 h3{font-size:15px;margin:22px 2px 8px}
-.login{position:relative;max-width:380px;margin:12vh auto 0;padding:28px 24px;border-radius:24px;background:linear-gradient(#0D1424,#0D1424) padding-box,var(--iri) border-box;border:1.5px solid transparent;box-shadow:0 30px 80px -30px rgba(167,139,250,.55)}
-.login h2{margin:0 0 4px;font-size:24px;letter-spacing:-.6px;background:var(--iri);-webkit-background-clip:text;background-clip:text;color:transparent;display:inline-block}
+.login{position:relative;max-width:380px;margin:12vh auto 0;padding:28px 24px;border-radius:24px;background:linear-gradient(#fff,#fff) padding-box,var(--iri) border-box;border:1.5px solid transparent;box-shadow:0 30px 80px -30px rgba(167,139,250,.55)}
+.login h2{margin:0 0 4px;font-size:24px;letter-spacing:-.6px;background:linear-gradient(115deg,#0E7490 0%,#5B21B6 50%,#BE185D 100%);-webkit-background-clip:text;background-clip:text;color:transparent;display:inline-block}
 .login label{display:block;font-size:13px;color:var(--mu);margin-top:12px}
-input,select,textarea{width:100%;padding:12px 13px;border:1px solid var(--ln2);border-radius:12px;font:inherit;background:rgba(255,255,255,.05);color:var(--tx);margin:5px 0;color-scheme:dark}
-input::placeholder,textarea::placeholder{color:#5F6C83}input:focus,select:focus,textarea:focus{outline:none;border-color:var(--cy);box-shadow:0 0 0 3px rgba(92,225,255,.18)}
-select option{background:#0D1424;color:var(--tx)}
-.btn{-webkit-appearance:none;background:var(--cy);color:#06101E;border:0;border-radius:14px;padding:14px 18px;font-size:16px;font-weight:700;width:100%;cursor:pointer;transition:box-shadow .15s,transform .1s}
-.btn:hover{box-shadow:0 0 22px rgba(92,225,255,.45)}.btn:active{transform:scale(.98)}
+input,select,textarea{width:100%;padding:12px 13px;border:1px solid var(--ln2);border-radius:12px;font:inherit;background:#fff;color:var(--tx);margin:5px 0;color-scheme:light}
+input::placeholder,textarea::placeholder{color:#9AA4B8}input:focus,select:focus,textarea:focus{outline:none;border-color:var(--cy);box-shadow:0 0 0 3px rgba(76,59,255,.15)}
+
+.btn{-webkit-appearance:none;background:var(--cy);color:#fff;border:0;border-radius:14px;padding:14px 18px;font-size:16px;font-weight:700;width:100%;cursor:pointer;transition:box-shadow .15s,transform .1s}
+.btn:hover{box-shadow:0 0 22px rgba(76,59,255,.3)}.btn:active{transform:scale(.98)}
 .btn:disabled{opacity:.45}.btn.sm{width:auto;padding:9px 14px;font-size:14px;border-radius:11px}
 .login .btn,#go{background:var(--iri);color:#0A0F1C;box-shadow:0 10px 30px -10px rgba(167,139,250,.7)}
-.card{background:var(--sf);border:1px solid var(--ln);border-radius:16px;padding:13px 15px;margin:10px 0}
+.card{background:#fff;border:1px solid var(--ln);border-radius:16px;box-shadow:0 1px 2px rgba(15,25,50,.04);padding:13px 15px;margin:10px 0}
 .card b{display:block}.card small,.mu{color:var(--mu);font-size:13px}
-.info{background:rgba(92,225,255,.06);border:1px solid rgba(92,225,255,.22);border-radius:14px;padding:11px 13px;font-size:14px;margin:8px 0;color:#C9D6E8}
+.info{background:#F1EFFF;border:1px solid #D9D3FF;border-radius:14px;padding:11px 13px;font-size:14px;margin:8px 0;color:#2A2F45}
 .info b{color:var(--tx)}
 .row{display:flex;gap:8px}.row input{flex:1.2;text-align:center;font-size:18px;font-weight:600}.row select{flex:1}
-.bar{position:fixed;left:0;right:0;bottom:0;padding:12px 14px calc(12px + env(safe-area-inset-bottom));display:flex;gap:10px;align-items:center;background:rgba(7,11,20,.82);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);border-top:1px solid var(--ln)}
+.bar{position:fixed;left:0;right:0;bottom:0;padding:12px 14px calc(12px + env(safe-area-inset-bottom));display:flex;gap:10px;align-items:center;background:rgba(255,255,255,.88);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);border-top:1px solid var(--ln)}
 .bar .t{flex:1;font-size:14px;color:var(--mu)}.bar .btn{width:auto;padding:13px 26px}
 .badge{display:inline-block;font-size:11.5px;padding:3px 10px;border-radius:999px;margin-left:6px;font-weight:600;border:1px solid transparent;vertical-align:1px}
-.menipis,.Menunggu,.Baru{background:rgba(255,181,71,.12);color:#FFC977;border-color:rgba(255,181,71,.3)}.habis,.Ditolak{background:rgba(255,93,115,.12);color:#FF8A9B;border-color:rgba(255,93,115,.3)}
-.aman,.Disetujui,.Dikirim,.Selesai{background:rgba(61,220,151,.12);color:#6FE8B3;border-color:rgba(61,220,151,.3)}.belum{background:var(--sf2);color:var(--mu)}
+.menipis,.Menunggu,.Baru{background:rgba(255,181,71,.12);color:#9A5B00;border-color:rgba(255,181,71,.3)}.habis,.Ditolak{background:rgba(255,93,115,.12);color:#C21F3A;border-color:rgba(255,93,115,.3)}
+.aman,.Disetujui,.Dikirim,.Selesai{background:rgba(61,220,151,.12);color:#08744C;border-color:rgba(61,220,151,.3)}.belum{background:var(--sf2);color:var(--mu)}
 .it{margin:10px 0;padding-bottom:12px;border-bottom:1px solid var(--ln)}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0}.chip{-webkit-appearance:none;border:1px solid var(--ln2);background:var(--sf);color:var(--tx);border-radius:999px;padding:8px 13px;font:inherit;font-size:14px;cursor:pointer}
-.chip.on{background:var(--cy);color:#06101E;border-color:var(--cy)}.chip small{opacity:.75}
+.chip.on{background:var(--cy);color:#fff;border-color:var(--cy)}.chip small{opacity:.75}
 .lnk{background:none;border:0;color:var(--cy);padding:4px 0;font:inherit;font-size:13px;text-decoration:underline;cursor:pointer}
 a{color:var(--cy)}
 .hide{display:none}.err{color:var(--red);font-size:14px;min-height:20px}
@@ -367,7 +367,7 @@ def add_staff_routes(app, sheets_getter, notify):
         return web.json_response({
             "name": "Panel Gudang " + config.BUSINESS_NAME, "short_name": "Gudang",
             "start_url": "/staff", "scope": "/staff", "display": "standalone",
-            "orientation": "any", "background_color": "#070B14", "theme_color": "#070B14",
+            "orientation": "any", "background_color": "#EEF2F9", "theme_color": "#EEF2F9",
             "icons": [{"src": "/staff/icon-192.png", "sizes": "192x192", "type": "image/png"},
                       {"src": "/staff/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}]},
             content_type="application/manifest+json")

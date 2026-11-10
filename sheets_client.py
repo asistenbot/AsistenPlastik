@@ -1337,6 +1337,29 @@ class SheetsClient:
             self._safe_close_reminders(no_po, "Batal")
         return found, nama_supplier, total
 
+    _bayar_po_lock = threading.Lock()
+
+    def bayar_po(self, no_po, via="dashboard"):
+        """PO udah dibayar ke supplier: kurangin utang (nilai PO + penyesuaian barang
+        lebih/kurang), catat Kas Keluar, tandai PO Lunas, tutup pengingat. Gak bisa dobel.
+        Balikin (supplier, total) atau None kalau PO gak ada / udah lunas / batal."""
+        with self._bayar_po_lock:
+            rows = self.get_po_items(no_po)
+            st = str(rows[0].get("Status", "")) if rows else ""
+            if not rows or st in ("Lunas", "Batal"):
+                return None
+            sup = self.nama_supplier_baku(str(rows[0].get("Nama_Supplier", "")))
+            total = sum(self._f(r.get("Subtotal")) for r in rows) + self.penyesuaian_po(no_po)
+            self.bayar_utang(sup, total, f"Pelunasan {no_po}")
+            self.add_kas_entry("Keluar", "Bayar Supplier", total,
+                               keterangan=f"Bayar utang {sup} {no_po} (via {via})", ref=no_po)
+            self.mark_po_lunas(no_po)
+            try:
+                self.close_reminders_for_ref(no_po, "Selesai")
+            except Exception:
+                pass
+            return sup, total
+
     def mark_po_lunas(self, no_po):
         ws = self._ws(config.SHEET_PURCHASE_ORDERS)
         headers = ws.row_values(1)

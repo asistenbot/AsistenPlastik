@@ -438,6 +438,19 @@ def add_stok_routes(app, sheets_getter, notify=None):
         return web.json_response({"ok": True, "nominal": n, **h})
 
     app.router.add_post("/dashboard/{token}/cektransfer", cek_transfer)
+    async def bayar_po(request):
+        if not await _link(request, ("@owner",)):
+            return web.json_response({"ok": False}, status=404)
+        pos = [str(x).strip()[:40] for x in ((await request.json()).get("pos") or [])][:100]
+        sheets = sheets_getter()
+        hasil = []
+        for no in dict.fromkeys(pos):
+            r = await asyncio.to_thread(sheets.bayar_po, no, "dashboard")
+            if r:
+                hasil.append({"po": no, "supplier": r[0], "total": r[1]})
+        return web.json_response({"ok": True, "hasil": hasil})
+
+    app.router.add_post("/dashboard/{token}/bayarpo", bayar_po)
     app.router.add_post("/dashboard/{token}/batallunas", batal_lunas)
     app.router.add_post("/dashboard/{token}/lunasbanyak", lunas_banyak)
     app.router.add_post("/dashboard/{token}/setsupplier", setsupplier)

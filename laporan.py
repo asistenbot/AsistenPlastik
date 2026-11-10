@@ -218,6 +218,10 @@ def hitung_laporan(sheets, bulan=None):
         due = po_due.get(o["po"], "")
         o["jatuh_tempo"] = due
         o["telat"] = bool(due and due < today.strftime("%Y-%m-%d"))
+        try:
+            o["total"] += sheets.penyesuaian_po(o["po"])   # barang datang lebih/kurang
+        except Exception:
+            pass
         po_list.append(o)
     po_list.sort(key=lambda o: (o["jatuh_tempo"] or "9999", o["po"]))
     utang = sheets.get_utang_summary()

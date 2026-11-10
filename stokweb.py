@@ -412,6 +412,14 @@ def add_stok_routes(app, sheets_getter, notify=None):
                     logger.exception("gagal kabar komisi")
         return web.json_response({"ok": True, "n": len(hasil), "total": sum(t for _, t in hasil)})
 
+    async def batal_lunas(request):
+        if not await _link(request, ("@owner",)):
+            return web.json_response({"ok": False}, status=404)
+        inv = str((await request.json()).get("invoice", "")).strip()[:40]
+        total = await asyncio.to_thread(sheets_getter().unmark_order_lunas, inv)
+        return web.json_response({"ok": total is not None, "total": total or 0})
+
+    app.router.add_post("/dashboard/{token}/batallunas", batal_lunas)
     app.router.add_post("/dashboard/{token}/lunasbanyak", lunas_banyak)
     app.router.add_post("/dashboard/{token}/setsupplier", setsupplier)
     app.router.add_get("/dashboard/{token}/suppliers", suppliers)

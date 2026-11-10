@@ -42,6 +42,27 @@ def _top(d, n=8):
     return sorted(d.items(), key=lambda kv: -kv[1])[:n]
 
 
+def _per_customer(inv, today):
+    """Semua invoice (semua waktu) dikelompokin per customer (nama beda huruf/spasi digabung)."""
+    import re
+    by = {}
+    for o in inv.values():
+        k = re.sub(r"[^a-z0-9]", "", o["customer"].lower()) or "-"
+        c = by.setdefault(k, {"nama": o["customer"], "total": 0.0, "lunas": 0.0, "belum": 0.0, "n": 0,
+                              "terakhir": "", "invoices": []})
+        c["total"] += o["total"]
+        c["lunas" if o["status"] == "Lunas" else "belum"] += o["total"]
+        c["n"] += 1
+        c["terakhir"] = max(c["terakhir"], o["tgl"])
+        if o["customer"].isupper() or len(o["customer"]) > len(c["nama"]):
+            c["nama"] = o["customer"]
+        c["invoices"].append({"invoice": o["invoice"], "tgl": o["tgl"], "total": o["total"], "status": o["status"],
+                              "bayar": o["bayar"], "items": [f"{it['nama']} x{it['qty']:g} {it['satuan']}" for it in o["items"]][:6]})
+    for c in by.values():
+        c["invoices"].sort(key=lambda i: (i["tgl"], i["invoice"]), reverse=True)
+    return sorted(by.values(), key=lambda c: -c["total"])
+
+
 def hitung_laporan(sheets, bulan=None):
     """bulan: 'YYYY-MM' (default bulan ini WIB). Balikin dict siap di-JSON."""
     today = _wib_today()
@@ -258,6 +279,10 @@ def hitung_laporan(sheets, bulan=None):
         "utang_supplier": [{"nama": k, "total": v} for k, v in _top(utang, 20)],
         "kas_masuk_kat": [{"nama": k, "total": v} for k, v in _top(lap["masuk_by_kategori"])],
         "kas_keluar_kat": [{"nama": k, "total": v} for k, v in _top(lap["keluar_by_kategori"])],
+        "customers": _per_customer(inv, today), "lunas_baru": sorted(
+            [{"invoice": o["invoice"], "customer": o["customer"], "tgl": o["tgl"], "bayar": o["bayar"], "total": o["total"]}
+             for o in inv.values() if o["status"] == "Lunas" and o["bayar"] >= (today - datetime.timedelta(days=7)).strftime("%Y-%m-%d")],
+            key=lambda o: (o["bayar"], o["invoice"]), reverse=True),
         "kas_list": kas_list, "komisi_belum_list": komisi_belum, "komisi_setting": komisi_set, "web_list": web_menunggu, "belum_kirim_list": belum_kirim[:40],
         "belum_kirim_all": [d["invoice"] for d in belum_kirim], "stok_bermasalah": len(pernah),
     }

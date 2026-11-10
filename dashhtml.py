@@ -59,6 +59,7 @@ td input{border:0!important;background:none!important;width:auto!important;text-
 <div class="pane" id="p_penjualan"></div>
 <div class="pane" id="p_tagihan"></div>
 <div class="pane" id="p_utang"></div>
+<div class="pane" id="p_customer"></div>
 <div class="pane" id="p_kas"></div>
 <div class="pane" id="p_stok">
 <div class="cards"><div class="card stok red" data-f="habis"><b id="c_h">0</b><span>Habis</span></div><div class="card stok amb" data-f="menipis"><b id="c_m">0</b><span>Menipis</span></div>
@@ -82,7 +83,7 @@ const fmt=n=>(Math.round(n*100)/100).toLocaleString('id-ID');
 const rp=n=>'Rp'+Math.round(n||0).toLocaleString('id-ID');
 const rps=n=>{n=n||0;const a=Math.abs(n);return a>=1e9?'Rp'+(n/1e9).toFixed(1).replace('.',',')+' M':a>=1e6?'Rp'+(n/1e6).toFixed(1).replace('.',',')+' jt':rp(n)};
 const dmy=s=>s?String(s).slice(8,10)+'-'+String(s).slice(5,7)+'-'+String(s).slice(0,4):'-';
-const TABS=[['ringkasan','🏠 Ringkasan'],['penjualan','📈 Penjualan'],['tagihan','🧾 Tagihan'],['utang','💸 Utang Supplier'],['kas','💰 Kas'],['stok','📦 Stok'],['gudang','🏭 Gudang']];
+const TABS=[['ringkasan','🏠 Ringkasan'],['penjualan','📈 Penjualan'],['tagihan','🧾 Tagihan'],['utang','💸 Utang Supplier'],['customer','👥 Customer'],['kas','💰 Kas'],['stok','📦 Stok'],['gudang','🏭 Gudang']];
 let PEND=0;function drawTabs(){document.getElementById('tabs').innerHTML=TABS.map(t=>'<button data-t="'+t[0]+'" class="'+(t[0]==TAB?'on':'')+'">'+t[1]+(t[0]=='gudang'&&PEND?' <span class="pill p-belum">'+PEND+'</span>':'')+'</button>').join('')}drawTabs();
 function showTab(t){TAB=t;try{location.hash=t}catch(_){}document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t==t));document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('on',p.id=='p_'+t))}
 document.getElementById('tabs').onclick=e=>{const b=e.target.closest('button');if(b)showTab(b.dataset.t)};
@@ -142,8 +143,21 @@ h+='<h2>Kas masuk per kategori</h2><div class="box">'+hbars(L.kas_masuk_kat)+'</
 h+=L.kas_list.length?'<table><thead><tr><th>Tanggal</th><th>Keterangan</th><th class="n">Jumlah</th></tr></thead><tbody>'+L.kas_list.map(k=>'<tr><td>'+dmy(k.tgl)+'</td><td>'+esc(k.kategori)+'<br><small style="color:#888">'+esc(k.ket)+'</small></td><td class="n" style="color:'+(k.jenis=='Masuk'?'#14633a':'#c0281c')+'">'+(k.jenis=='Masuk'?'+':'-')+rp(k.jumlah)+'</td></tr>').join('')+'</tbody></table>':'<div class="empty">Belum ada transaksi kas bulan ini.</div>';
 document.getElementById('p_kas').innerHTML=h}
 
+let CSEL=null;
+function renderCustomer(){const C=L.customers||[];let h='';
+h+='<h2>⚠️ Ditandai LUNAS 7 hari terakhir</h2><div class="mut" style="margin-bottom:4px">Cek di sini kalau ada yang kepencet lunas. Klik ↩️ buat balikin jadi belum lunas (Kas Masuk-nya ikut dihapus).</div>'+
+((L.lunas_baru||[]).length?'<table><thead><tr><th>Invoice</th><th class="n">Total</th></tr></thead><tbody>'+L.lunas_baru.map(o=>'<tr><td><b>'+esc(o.customer)+'</b><br><small style="color:#888">'+esc(o.invoice)+' • invoice '+dmy(o.tgl)+' • <b>lunas '+dmy(o.bayar)+'</b></small><div style="margin-top:4px"><button class="btn s r" data-bl="'+esc(o.invoice)+'" data-n="'+esc(o.customer)+'" data-j="'+o.total+'">↩️ Batal lunas</button></div></td><td class="n">'+rp(o.total)+'</td></tr>').join('')+'</tbody></table>':'<div class="empty">Gak ada.</div>');
+h+='<h2>👥 Penjualan per customer (semua waktu)</h2><input type="search" id="ccari" placeholder="cari customer..." value="'+esc(CSEL||'')+'">';
+h+='<table><thead><tr><th>Customer</th><th class="n">Total belanja</th><th class="n hide-s">Sudah bayar</th><th class="n">Belum bayar</th></tr></thead><tbody id="ctb"></tbody></table><div id="cdet"></div>';
+document.getElementById('p_customer').innerHTML=h;
+const draw=()=>{const q=(document.getElementById('ccari').value||'').toLowerCase();document.getElementById('ctb').innerHTML=C.filter(c=>c.nama.toLowerCase().includes(q)).map((c,i)=>'<tr style="cursor:pointer" data-ci="'+C.indexOf(c)+'"><td><b>'+esc(c.nama)+'</b><br><small style="color:#888">'+c.n+' invoice • terakhir '+dmy(c.terakhir)+'</small></td><td class="n">'+rp(c.total)+'</td><td class="n hide-s" style="color:#14633a">'+rp(c.lunas)+'</td><td class="n" style="color:'+(c.belum>0?'#c0281c':'#14633a')+'">'+rp(c.belum)+'</td></tr>').join('')};
+draw();document.getElementById('ccari').oninput=draw;
+document.getElementById('ctb').onclick=e=>{const tr=e.target.closest('tr');if(!tr)return;const c=C[tr.dataset.ci];
+document.getElementById('cdet').innerHTML='<h2>📄 '+esc(c.nama)+'</h2><div class="cards">'+card('Total belanja',rps(c.total),'blu',c.n+' invoice')+card('Sudah bayar',rps(c.lunas),'grn')+card('Belum bayar',rps(c.belum),c.belum>0?'red':'grn')+'</div><table><thead><tr><th>Invoice</th><th class="n">Total</th><th>Status</th></tr></thead><tbody>'+
+c.invoices.map(o=>'<tr><td>'+esc(o.invoice)+'<br><small style="color:#888">'+dmy(o.tgl)+(o.items.length?' • '+esc(o.items.join(', ')):'')+'</small><div style="margin-top:4px">'+dok(o.invoice)+(o.status=='Lunas'?' <button class="btn s r" data-bl="'+esc(o.invoice)+'" data-n="'+esc(c.nama)+'" data-j="'+o.total+'">↩️ Batal lunas</button>':' <button class="btn s" data-lunas="'+esc(o.invoice)+'" data-n="'+esc(c.nama)+'" data-j="'+o.total+'">✅ Lunas</button>')+'</div></td><td class="n">'+rp(o.total)+'</td><td>'+(o.status=='Lunas'?'<span class="pill p-sudah">Lunas '+dmy(o.bayar)+'</span>':'<span class="pill p-belum">Belum</span>')+'</td></tr>').join('')+'</tbody></table>';
+document.getElementById('cdet').scrollIntoView({behavior:'smooth'})}}
 async function loadLap(){const bl=document.getElementById('bln').value;try{const r=await fetch(B+'/laporan?bulan='+encodeURIComponent(bl));const j=await r.json();if(!j.ok)throw 0;L=j;if(!bl)document.getElementById('bln').value=j.bulan;
-renderRingkasan();renderPenjualan();renderTagihan();renderUtang();renderKas()}catch(e){document.getElementById('p_ringkasan').innerHTML='<div class="box">Gagal ambil laporan. Coba refresh sebentar lagi (Google Sheets lagi sibuk).</div>'}}
+renderRingkasan();renderPenjualan();renderTagihan();renderUtang();renderKas();renderCustomer()}catch(e){document.getElementById('p_ringkasan').innerHTML='<div class="box">Gagal ambil laporan. Coba refresh sebentar lagi (Google Sheets lagi sibuk).</div>'}}
 document.getElementById('bln').onchange=loadLap;
 function cetak(all){const nm=(TABS.find(t=>t[0]==TAB)||['',''])[1].replace(/^\S+\s/,'');
 document.getElementById('phinfo').textContent=(all?'Laporan lengkap':nm)+' — '+(L?L.bulan_label:'')+' • dicetak '+new Date().toLocaleString('id-ID');
@@ -179,6 +193,8 @@ alert(sisa>=n?'Nominal belum cukup buat 1 invoice pun.':'☑️ Udah dicentang i
 if(b.dataset.cr!==undefined){const c=window._PC[b.dataset.cr];const w=window.open('','_blank');if(!w){alert('Izinkan pop-up buat cetak');return}
 w.document.write('<html><head><meta charset="utf-8"><title>Rincian '+esc(c.nama)+'</title><style>body{font:14px system-ui,sans-serif;margin:24px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #999;padding:6px 8px;text-align:left}td.n,th.n{text-align:right}h2,h3{margin:4px 0}</style></head><body><h2>'+esc(document.title.indexOf('Dashboard')>=0?'__BIZ__':'__BIZ__')+'</h2><h3>Rincian tagihan: '+esc(c.nama)+'</h3><div>Per '+new Date().toLocaleDateString('id-ID')+'</div><br><table><tr><th>No</th><th>Invoice</th><th>Tanggal</th><th class="n">Jumlah</th></tr>'+
 c.inv.slice().sort((a,b)=>a.tgl<b.tgl?-1:1).map((t,i)=>'<tr><td>'+(i+1)+'</td><td>'+esc(t.invoice)+'</td><td>'+dmy(t.tgl)+'</td><td class="n">'+rp(t.total)+'</td></tr>').join('')+'<tr><th colspan="3">TOTAL</th><th class="n">'+rp(c.total)+'</th></tr></table></body></html>');w.document.close();setTimeout(()=>w.print(),300);return}
+if(b.dataset.bl){if(!confirm('Balikin '+b.dataset.bl+' ('+b.dataset.n+', '+rp(+b.dataset.j)+') jadi BELUM LUNAS?\nCatatan Kas Masuk-nya dihapus & pengingat tagihan dipasang lagi.'))return;b.disabled=true;
+const r=await (await fetch(B+'/batallunas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({invoice:b.dataset.bl})})).json();alert(r.ok?'↩️ '+b.dataset.bl+' balik jadi belum lunas.':'Gagal');loadLap();return}
 if(b.dataset.km){if(!confirm('Komisi '+b.dataset.km+' ('+rp(+b.dataset.j)+') sudah dibayar? Otomatis dicatat Kas Keluar.'))return;b.disabled=true;const r=await (await fetch(B+'/bayarkomisi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({invoice:b.dataset.km})})).json();if(!r.ok)alert(r.error||'Gagal');loadLap();return}
 if(b.dataset.tutup){if(!confirm('Tutup '+b.dataset.tutup+'? Sisa barang dianggap gak dikirim & PO hilang dari daftar staff.'))return;b.disabled=true;await fetch(B+'/tutuppo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({po:b.dataset.tutup})});loadPend();return}
 if(b.dataset.th){cetakThermal(B+'/struk/'+encodeURIComponent(b.dataset.th),b);return}

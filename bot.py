@@ -2648,12 +2648,16 @@ async def reminder_job(context: ContextTypes.DEFAULT_TYPE):
         logger.exception("gagal baca pengingat")
         return
     chat_ids = list(dict.fromkeys(c for c in config.OWNER_TELEGRAM_IDS if c))
-    singles = [[rem] for rem in due if rem.get("Jenis") != "kontra_bon"]
+    kirim = getattr(config, "PENGINGAT_DIKIRIM", None)
+    singles = [[rem] for rem in due if rem.get("Jenis") != "kontra_bon"
+               and (kirim is None or rem.get("Jenis") in kirim)]
     # KONTRA BON: 1 pesan aja buat SEMUA customer & semua invoice yang belum
     # (hari ini + yang kelewat), 1x klik beres. Dikirim sekali di hari jadwalnya.
     kb_all = [r for r in sheets.get_active_reminders()
               if r.get("Jenis") == "kontra_bon" and str(r.get("Tanggal", ""))[:10] <= today]
     kb_trigger = any(str(r.get("Tanggal", ""))[:10] == today and str(r.get("Terkirim_Tgl", "")) != today for r in kb_all)
+    if kirim is not None and "kontra_bon" not in kirim:
+        kb_trigger = False
     batches = singles + ([kb_all] if kb_trigger else [])
     for batch in batches:
         rem = batch[0]

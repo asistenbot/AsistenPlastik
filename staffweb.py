@@ -317,7 +317,7 @@ def add_staff_routes(app, sheets_getter, notify):
             return web.Response(status=404, text="Invoice tidak ketemu.")
         nama, data = hasil
         return web.Response(body=data, content_type="application/pdf",
-                            headers={"Content-Disposition": f'inline; filename="{nama}"'})
+                            headers={"Content-Disposition": f'inline; filename="{nama}"', "Cache-Control": "no-store"})
 
     app.router.add_post("/staff/api/terimapo", terimapo)
     async def struk(request):
@@ -337,7 +337,7 @@ def add_staff_routes(app, sheets_getter, notify):
             return web.Response(status=404, text="Invoice tidak ketemu.")
         nama, data = hasil
         return web.Response(body=data, content_type="text/plain", charset="ascii",
-                            headers={"Content-Disposition": f'attachment; filename="{nama}"'})
+                            headers={"Content-Disposition": f'attachment; filename="{nama}"', "Cache-Control": "no-store"})
 
     app.router.add_get("/staff/api/doktxt/{inv}", dok_sj_txt)
     app.router.add_get("/staff/api/dok/{inv}", dok_sj)

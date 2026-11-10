@@ -19,7 +19,7 @@ from PIL import Image, ImageDraw, ImageFont
 import config
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-FONT_PATH = os.path.join(BASE_DIR, "fonts", "DejaVuSansMono.ttf")
+FONT_PATH = os.path.join(BASE_DIR, "fonts", "LiberationMono-Bold.ttf")  # angka 0 polos (bukan bertitik)
 
 COLS = 80            # kolom per baris (10 cpi x 8 inch)
 INNER = COLS - 2     # isi di dalam bingkai
@@ -288,8 +288,8 @@ def _render_clean(lines, title):
     x0, y0 = 0.25 * dpi, 0.2 * dpi
     img = Image.new("RGB", (w, h), (255, 255, 255))
     dr = ImageDraw.Draw(img)
-    f1 = ImageFont.truetype(FONT_PATH, int(round(cw / 0.602)))
-    f2 = ImageFont.truetype(FONT_PATH, int(round(2 * cw / 0.602)))
+    f1 = ImageFont.truetype(FONT_PATH, int(round(cw / 0.6)))
+    f2 = ImageFont.truetype(FONT_PATH, int(round(2 * cw / 0.6)))
     ink = (20, 20, 25)
     for li, s in enumerate(lines):
         y = y0 + li * lh + lh / 2

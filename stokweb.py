@@ -310,13 +310,13 @@ def add_stok_routes(app, sheets_getter, notify=None):
                 return web.Response(status=404, text="Invoice tidak ketemu.")
             nama, data = hasil
             return web.Response(body=data, content_type="text/plain", charset="ascii",
-                                headers={"Content-Disposition": f'attachment; filename="{nama}"'})
+                                headers={"Content-Disposition": f'attachment; filename="{nama}"', "Cache-Control": "no-store"})
         hasil = await asyncio.to_thread(bangun_pdf, sheets_getter(), request.match_info["inv"], kind)
         if not hasil:
             return web.Response(status=404, text="Invoice tidak ketemu.")
         nama, data = hasil
         return web.Response(body=data, content_type="application/pdf",
-                            headers={"Content-Disposition": f'inline; filename="{nama}"'})
+                            headers={"Content-Disposition": f'inline; filename="{nama}"', "Cache-Control": "no-store"})
 
     async def struk(request):
         if not await _link(request, ("@owner",)):

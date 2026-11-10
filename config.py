@@ -118,7 +118,10 @@ KAS_KELUAR_KATEGORI = ["Bayar Supplier", "Operasional", "Gaji", "Lainnya"]
 REMINDER_HOUR = 8
 # Tempo bayar default kalau customer/supplier gak ada di tab PengaturanTagihan
 DEFAULT_TEMPO_CUSTOMER = 14
-KONTRABON_TEMPO_HARI = 14  # setelah kontra bon, cek pembayaran selalu 14 hari lagi (semua customer)
+KONTRABON_TEMPO_HARI = 14
+# pengingat yang DIKIRIM ke Telegram. Sisanya tetap dicatat (keliatan di dashboard: jatuh tempo / lewat tempo)
+# tapi gak dikirim. Isi lengkapnya: {"kontra_bon", "bayar_customer", "bayar_supplier"}
+PENGINGAT_DIKIRIM = {"kontra_bon"}  # setelah kontra bon, cek pembayaran selalu 14 hari lagi (semua customer)
 DEFAULT_TEMPO_SUPPLIER = 14
 # Isi awal tab PengaturanTagihan (dibuat otomatis kalau tab-nya masih kosong).
 # Selanjutnya TINGGAL EDIT DI GOOGLE SHEETS, gak perlu ubah kode:

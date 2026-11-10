@@ -1798,8 +1798,17 @@ class SheetsClient:
             b["items"].append({"code": r.get("Item_Code", ""), "nama": r.get("Nama", ""), "qty": r.get("Qty", ""),
                                "satuan": r.get("Satuan", "")})
         real = self._batch_udah_real()
+        # hitung stok (opname) terakhir per barang -> kiriman yang lebih lama dari itu udah "ketimpa"
+        hitung_akhir = {}
+        for m in self._records(self._ws(config.SHEET_MUTASI)):
+            if m.get("Jenis") == "Hitung":
+                k = str(m.get("Item_Code", "")).strip().upper()
+                hitung_akhir[k] = max(hitung_akhir.get(k, ""), str(m.get("Waktu", "")))
         for b in by.values():
             b["sudah_real"] = real.get(b["batch"], "")
+            codes = [str(i["code"]).strip().upper() for i in b["items"]]
+            b["ketimpa"] = bool(codes) and all(hitung_akhir.get(k, "") > b["waktu"] for k in codes)
+            b["beres"] = bool(b["sudah_real"] or b["ketimpa"] or b["jenis"] == "Hitung")
         return sorted(by.values(), key=lambda b: b["waktu"], reverse=True)
 
     def _batch_udah_real(self):

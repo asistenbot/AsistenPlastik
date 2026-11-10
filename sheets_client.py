@@ -1362,6 +1362,17 @@ class SheetsClient:
         ord_by = {}
         for o in orders:
             ord_by.setdefault(str(o.get("Item_Code", "")).strip().upper(), []).append(o)
+        # barang yang "distok": dipesan / khusus customer langganan (Grandia, Shu Guo, ...)
+        langganan = [k for k in getattr(config, "STOK_PANTAU_CUSTOMER", []) if k]
+
+        def _langganan(nama):
+            n = _norm(nama)
+            return any(k in n for k in langganan)
+
+        pantau = {str(o.get("Item_Code", "")).strip().upper() for o in orders if _langganan(o.get("Nama_Customer", ""))}
+        for r in produk:
+            if any(_langganan(x) for x in str(r.get("Khusus_Customer", "")).split(",") if x.strip()):
+                pantau.add(str(r["Item_Code"]).strip().upper())
         out = []
         for r in produk:
             code = str(r["Item_Code"]).strip()
@@ -1388,6 +1399,10 @@ class SheetsClient:
                     if str(o.get("Timestamp", "")) > t0:
                         stok -= self._f(o.get("Qty"))
             mn = self._f(r.get("Stok_Min"))
+            auto_min = False
+            if mn <= 0 and code.upper() in pantau:
+                mn = float(getattr(config, "STOK_MIN_KATEGORI", {}).get(str(r.get("Kategori", "")).strip().upper(), 0))
+                auto_min = mn > 0
             if stok is None:
                 status = "belum"
             elif stok <= 0:
@@ -1400,7 +1415,7 @@ class SheetsClient:
                         " - " + str(r.get("Deskripsi")) if str(r.get("Deskripsi", "")).strip() not in ("", "POLOS") else ""),
                         "kategori": r.get("Kategori", ""), "satuan": r.get("Satuan", ""),
                         "isi_bal": self._f(r.get("Isi_Bal")), "min": mn, "stok": stok, "status": status,
-                        "estimasi": estimasi})
+                        "estimasi": estimasi, "auto_min": auto_min, "dipantau": mn > 0})
         return out
 
     def get_mutasi_recent(self, n=15):
@@ -2009,7 +2024,8 @@ class SheetsClient:
         jalan = self.po_sedang_jalan()
         out = []
         for i in self.get_stok_all():
-            if i["status"] not in ("habis", "menipis"):
+            # cuma barang yang distok (ada Stok_Min / dipesan langganan) yang di-alert
+            if i["status"] not in ("habis", "menipis") or not i.get("dipantau"):
                 continue
             k = str(i["code"]).upper()
             if codes is not None and k not in codes:

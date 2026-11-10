@@ -154,6 +154,10 @@ SHEET_PERMINTAAN = "PermintaanBarang"
 SHEET_PENERIMAAN = "PenerimaanPO"
 # jumlah PO otomatis per kategori kalau kolom Qty_Order di PriceList kosong
 QTY_ORDER_KATEGORI = {"SAMPAH": 125}
+# batas "stok dikit" otomatis per kategori (kalau kolom Stok_Min kosong) -- TAPI cuma buat
+# barang yang dipesan customer langganan di bawah (barang lain dianggap gak distok, gak di-alert)
+STOK_MIN_KATEGORI = {"SAMPAH": 25}
+STOK_PANTAU_CUSTOMER = ["grandia", "shuguo"]   # potongan nama, huruf kecil tanpa spasi
 SHEET_KOMISI = "Komisi"               # setting komisi jalur belakang per customer (RAHASIA)
 SHEET_KOMISI_CATAT = "KomisiCatatan"  # komisi per invoice yang udah lunas: belum/sudah dibayar
 SHEET_PENGIRIMAN = "PengirimanOrder"

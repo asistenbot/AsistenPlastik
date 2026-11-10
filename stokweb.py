@@ -302,8 +302,16 @@ def add_stok_routes(app, sheets_getter, notify=None):
         if not await _link(request, ("@owner",)):
             return web.Response(status=404, text="Link tidak valid.")
         kind = request.match_info["kind"]
-        if kind not in ("inv", "sj", "invtxt", "sjtxt"):
+        if kind not in ("inv", "sj", "invtxt", "sjtxt", "wa"):
             return web.Response(status=404, text="Jenis dokumen salah.")
+        if kind == "wa":
+            from invoicewa import generate_invoice_wa
+            hasil = await asyncio.to_thread(generate_invoice_wa, sheets_getter(), request.match_info["inv"])
+            if not hasil:
+                return web.Response(status=404, text="Invoice tidak ketemu.")
+            nama, data = hasil
+            return web.Response(body=data, content_type="image/png",
+                                headers={"Content-Disposition": f'inline; filename="{nama}"', "Cache-Control": "no-store"})
         from docbuild import bangun_pdf, bangun_txt
         if kind.endswith("txt"):
             hasil = await asyncio.to_thread(bangun_txt, sheets_getter(), request.match_info["inv"], kind[:-3])

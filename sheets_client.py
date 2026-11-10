@@ -1768,6 +1768,26 @@ class SheetsClient:
                                "kali": kali, "pesan_stok": qty * kali, "harga": self._f(r.get("Harga_Satuan")),
                                "satuan_stok": str((p or {}).get("Satuan", "") or sat),
                                "_p": p})
+        # baris PO yang namanya gak cocok katalog & belum ada peta: tebak dari barang yang
+        # beneran pernah diterima buat PO ini (biar penerimaan lama tetap kehitung)
+        import difflib
+        for no, d in out.items():
+            dapat = [k for k in diterima.get(no, {}) if k]
+            dipakai = {it["code"].upper() for it in d["items"] if it["code"]}
+            sisa = [k for k in dapat if k not in dipakai]
+            for it in d["items"]:
+                if it["code"] or not sisa:
+                    continue
+                k = max(sisa, key=lambda c: difflib.SequenceMatcher(
+                    None, _norm(it["nama"]), _norm(self._label_produk(by_code.get(c, {})) or c)).ratio())
+                p = by_code.get(k)
+                sisa.remove(k)
+                it["code"] = str(p["Item_Code"]).strip() if p else k
+                it["satuan_stok"] = str((p or {}).get("Satuan", "") or it["satuan_stok"])
+                # satuan PO lama (KG) beda sama satuan stok (Pak): anggap 1 baris PO = 1 kiriman
+                if p and str(p.get("Satuan", "")).strip().lower() != it["satuan"].strip().lower():
+                    it["kali"] = (diterima[no].get(k, 0.0) / it["qty"]) if it["qty"] else 1.0
+                    it["pesan_stok"] = it["qty"] * it["kali"]
         # bagi yang udah diterima ke baris-baris PO (per kode barang, urut)
         for no, d in out.items():
             sisa_kode = dict(diterima.get(no, {}))
@@ -1788,7 +1808,10 @@ class SheetsClient:
         barangnya udah datang lengkap, atau ditutup owner."""
         produk = [p for p in self.get_price_list() if str(p.get("Item_Code", "")).strip()]
         res = []
+        sejak = getattr(config, "TERIMA_PO_SEJAK", "")
         for d in sorted(self._po_lines().values(), key=lambda d: d["po"], reverse=True):
+            if hanya_belum and sejak and d["tgl"] and d["tgl"] < sejak and not d["menunggu"]:
+                continue
             if d["menunggu"]:
                 st = "Menunggu"
             elif d["ditutup"]:

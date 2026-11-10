@@ -154,6 +154,8 @@ SHEET_PERMINTAAN = "PermintaanBarang"
 SHEET_PENERIMAAN = "PenerimaanPO"
 # jumlah PO otomatis per kategori kalau kolom Qty_Order di PriceList kosong
 QTY_ORDER_KATEGORI = {"SAMPAH": 125}
+# PO yang dibuat SEBELUM tanggal ini gak muncul lagi di "Terima PO" staff (barangnya udah lama datang)
+TERIMA_PO_SEJAK = "2026-10-01"
 # batas "stok dikit" otomatis per kategori (kalau kolom Stok_Min kosong) -- TAPI cuma buat
 # barang yang dipesan customer langganan di bawah (barang lain dianggap gak distok, gak di-alert)
 STOK_MIN_KATEGORI = {"SAMPAH": 25}

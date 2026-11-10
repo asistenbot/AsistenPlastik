@@ -453,7 +453,7 @@ def generate_surat_jalan_dotmatrix(no_surat_jalan, nama_customer, no_hp, alamat,
                 "Mohon periksa jumlah dan kondisi barang saat diterima.",
                 "", "", "",
                 "Dikirim oleh,".ljust(22) + " " * 34 + "Diterima oleh,".ljust(24),
-                "", "", "",
+                "", "", "", "", "",
                 "(____________________)".ljust(22) + " " * 34 + "(____________________)"]
 
     tgl = _tgl_label(tanggal)

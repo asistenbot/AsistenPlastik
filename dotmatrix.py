@@ -169,8 +169,8 @@ def _build(doc_title, no_dok, ref_line, party, widths, aligns, head, item_groups
         def build(variant):
             title_txt = doc_title if variant == "txt" else ""
             L = [name.ljust(COLS - len(title_txt)) + title_txt,
-                 "No  : " + no_dok,
-                 *(([ref_line, (ref_right + ("   " + hal if hal else "")).rjust(COLS)]) if ref_right
+                 ("No  : " + no_dok).ljust(COLS - (len(hal) if ref_right else 0)) + (hal if ref_right else ""),
+                 *(([ref_line, (" " * max(0, COLS - 8 - 2 * len(doc_title)) + ref_right)[:COLS]]) if ref_right
                    else [ref_line.ljust(COLS - len(hal)) + hal]),
                  _hl("=")]
             L.extend(party)
@@ -286,7 +286,7 @@ def _render(lines, title):
         for ci, ch in enumerate(s):
             p.glyph(ch, ci, li, 1, bold_line)
     # judul besar (2x lebar & tinggi) di kanan atas
-    col = COLS - 2 * len(title)
+    col = COLS - 8 - 2 * len(title)        # sama kaya PDF: ujung judul di kolom 72
     p.text(col, 0, title, 2, True)
     return p.png()
 

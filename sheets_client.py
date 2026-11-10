@@ -138,7 +138,7 @@ _WRITE_METHODS = {
     "batch_clear", "format", "batch_format", "resize", "add_rows", "add_cols", "sort",
     "merge_cells", "unmerge_cells", "freeze", "set_basic_filter", "clear_basic_filter",
 }
-_CACHE_TTL = 20  # detik; hemat kuota baca Google Sheets (maks 60 baca/menit)
+_CACHE_TTL = 45  # detik; hemat kuota baca Google Sheets (maks 60 baca/menit). Nulis = cache tab itu langsung dibuang.
 
 
 class _CachedWS:
@@ -155,7 +155,15 @@ class _CachedWS:
             hit = self._cache.get(key)
             if hit and now - hit[0] < _CACHE_TTL:
                 return copy.deepcopy(hit[1])
-        val = getattr(self._ws, name)(*a, **kw)
+        for coba in range(3):
+            try:
+                val = getattr(self._ws, name)(*a, **kw)
+                break
+            except gspread.exceptions.APIError as e:
+                # 429 = kuota baca per menit abis -> tunggu bentar, coba lagi
+                if "429" not in str(e) or coba == 2:
+                    raise
+                time.sleep(4 * (coba + 1))
         with self._lock:
             self._cache[key] = (time.time(), copy.deepcopy(val))
         return val
@@ -364,11 +372,47 @@ class SheetsClient:
         return ignore
 
     def _records(self, ws):
-        """get_all_records, tapi kolom No_HP/Item_Code selalu dipaksa jadi
-        teks (lihat _TEXT_ONLY_COLUMNS) biar angka 0 di depan gak ilang."""
-        headers = SCHEMA.get(ws.title) or ws.row_values(1)
-        ignore = self._numericise_ignore_for(headers)
-        return ws.get_all_records(default_blank="", numericise_ignore=ignore)
+        """Kayak get_all_records, tapi dibangun dari get_all_values (yang bisa
+        di-prefetch sekaligus semua tab = hemat kuota). Kolom No_HP/Item_Code
+        tetap teks biar angka 0 di depan gak ilang."""
+        from gspread.utils import numericise_all
+        values = ws.get_all_values()
+        if not values or not values[0]:
+            return []
+        keys = values[0]
+        ignore = self._numericise_ignore_for(keys)
+        out = []
+        for row in values[1:]:
+            row = list(row) + [""] * (len(keys) - len(row))
+            out.append(dict(zip(keys, numericise_all(row[:len(keys)], default_blank="", ignore=ignore))))
+        return out
+
+    def prefetch(self):
+        """Baca SEMUA tab dalam 1 panggilan API (values_batch_get) terus taruh di
+        cache. Dipanggil sebelum dashboard / laporan yang baca banyak tab."""
+        now = time.time()
+        with self._cache_lock:
+            fresh = {k[0] for k, v in self._data_cache.items()
+                     if k[1] == "get_all_values" and now - v[0] < _CACHE_TTL - 5}
+        if not getattr(self, "_titles", None):
+            try:
+                self._titles = [w.title for w in self.sh.worksheets()]
+            except Exception:
+                return
+        want = [t for t in self._titles if t in SCHEMA and t not in fresh]
+        if not want:
+            return
+        try:
+            res = self.sh.values_batch_get([f"'{t}'" for t in want])
+        except Exception:
+            logger.exception("prefetch gagal (lanjut baca biasa)")
+            return
+        for t, vr in zip(want, res.get("valueRanges", [])):
+            vals = vr.get("values", [])
+            w = max((len(r) for r in vals), default=0)
+            vals = [list(r) + [""] * (w - len(r)) for r in vals]
+            with self._cache_lock:
+                self._data_cache[(t, "get_all_values", "()", "[]")] = (time.time(), copy.deepcopy(vals))
 
     # ---------------- PRICELIST ----------------
 

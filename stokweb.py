@@ -179,6 +179,7 @@ def add_stok_routes(app, sheets_getter, notify=None):
         if not await _link(request, ("@owner",)):
             return web.json_response({"ok": False}, status=404)
         sheets = sheets_getter()
+        await asyncio.to_thread(sheets.prefetch)
         rows = await asyncio.to_thread(sheets.get_pengajuan, "Menunggu", None)
         batches = {}
         for r in rows:

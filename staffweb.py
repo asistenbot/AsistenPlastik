@@ -181,6 +181,7 @@ def add_staff_routes(app, sheets_getter, notify):
         if not st:
             return web.json_response({"ok": False}, status=401)
         sheets = sheets_getter()
+        await asyncio.to_thread(sheets.prefetch)
         from stokweb import _stok_items
         items = await asyncio.to_thread(_stok_items, sheets)
         orders = await asyncio.to_thread(sheets.get_orders_gudang, 40)

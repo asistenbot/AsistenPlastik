@@ -925,6 +925,11 @@ async def _do_laporanbulanan(update, year, month):
 
 async def rekap_job(context: ContextTypes.DEFAULT_TYPE):
     """Tiap tanggal 1 (>= jam 08 WIB): kirim rekap bulan lalu otomatis, sekali aja."""
+    try:
+        import asyncio as _aio
+        await _aio.to_thread(_sheets().prefetch)
+    except Exception:
+        pass
     now = _wib_now()
     if now.day != 1 or now.hour < config.REMINDER_HOUR:
         return
@@ -2091,16 +2096,54 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"❌ Order online {pid} ditolak. Kabarin customernya via WA ya.")
         return
 
-    if data.startswith("wo_ok:"):
+    if data.startswith("wo_docs:"):
+        inv = data.split(":", 1)[1]
+        await query.edit_message_reply_markup(reply_markup=None)
+        await _kirim_invoice(update, context, inv)
+        await _kirim_surat_jalan(update, context, inv)
+        return
+
+    if data.startswith(("wo_ok:", "wo_force:")):
         import json as _json
+        paksa = data.startswith("wo_force:")
         pid = data.split(":", 1)[1]
         sheets = _sheets()
         row = sheets.get_pesanan_web(pid)
-        if not row or str(row.get("Status", "")) != "Menunggu":
-            await query.edit_message_text(f"Order online {pid} udah diproses sebelumnya.")
+        st = str(row.get("Status", "")) if row else ""
+        if not row:
+            await query.edit_message_text(f"Order online {pid} gak ketemu.")
             return
-        sheets.set_pesanan_web_status(pid, "Diproses")
+        if st.startswith("Diproses INV-"):
+            inv = st.split(" ", 1)[1]
+            await query.edit_message_text(
+                f"Order online {pid} udah jadi {inv}.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📄 Kirim ulang invoice & surat jalan",
+                                                                         callback_data=f"wo_docs:{inv}")]]))
+            return
+        if st == "Ditolak":
+            await query.edit_message_text(f"Order online {pid} udah ditolak sebelumnya.")
+            return
+        if st != "Menunggu" and not paksa:
+            # versi lama: ditandai "Diproses" duluan -> bisa jadi invoice-nya gak kesimpen (error Google)
+            nama = str(row.get("Nama", ""))
+            waktu = str(row.get("Waktu", ""))
+            cand = sorted({str(r.get("No_Invoice", "")) for r in sheets.get_all_orders()
+                           if _sheets_norm(r.get("Nama_Customer", "")) == _sheets_norm(nama)
+                           and str(r.get("Timestamp", "")) >= waktu[:16]})
+            if cand:
+                await query.edit_message_text(
+                    f"Order online {pid} ({nama}) kayaknya udah jadi {', '.join(cand)}.",
+                    reply_markup=InlineKeyboardMarkup(
+                        [[InlineKeyboardButton(f"📄 Kirim ulang {cand[-1]}", callback_data=f"wo_docs:{cand[-1]}")],
+                         [InlineKeyboardButton("➕ Tetep proses jadi invoice baru", callback_data=f"wo_force:{pid}")]]))
+            else:
+                await query.edit_message_text(
+                    f"⚠️ Order online {pid} ({nama}) ketandai diproses tapi INVOICE-NYA GAK KETEMU "
+                    "(kemungkinan tadi Google Sheets lagi error). Proses sekarang?",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Proses sekarang", callback_data=f"wo_force:{pid}")]]))
+            return
         context.user_data["pending_order"] = _json.loads(row["Payload"])
+        context.user_data["_wo_pid"] = pid
         data = "order_confirm"
 
     if data == "order_confirm":
@@ -2117,6 +2160,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             tanggal_order=_valid_tanggal_order(parsed.get("tanggal_order")),
         )
         context.user_data["last_invoice"] = no_invoice
+        wo_pid = context.user_data.pop("_wo_pid", None)
+        if wo_pid:
+            try:   # baru ditandai SETELAH invoice beneran kesimpen
+                sheets.set_pesanan_web_status(wo_pid, f"Diproses {no_invoice}")
+            except Exception:
+                logger.exception("gagal update status order web %s", wo_pid)
         await query.edit_message_text(f"✅ Order disimpan sebagai *{no_invoice}*. Lagi bikin invoice & surat jalan...", parse_mode=ParseMode.MARKDOWN)
         ex = parsed.get("_extra") or {}
         if ex:
@@ -2581,6 +2630,11 @@ def _reminder_message(rem):
 
 async def reminder_job(context: ContextTypes.DEFAULT_TYPE):
     """Dipanggil tiap 10 menit. Kirim pengingat yang udah jatuh tempo, sekali
+    try:
+        import asyncio as _aio
+        await _aio.to_thread(_sheets().prefetch)
+    except Exception:
+        pass
     per hari per pengingat, mulai jam REMINDER_HOUR WIB. Datanya disimpen di
     tab Pengingat (Google Sheets), jadi aman walau bot direstart."""
     now = _wib_now()
@@ -3102,6 +3156,11 @@ def _teks_stok_menipis(items):
     return "\n".join(lines)
 
 
+def _sheets_norm(s):
+    import re as _re
+    return _re.sub(r"[^a-z0-9]", "", str(s or "").lower())
+
+
 def _pendek(nama, n=22):
     nama = str(nama)
     for buang in ("HD Kantong Sampah Hitam ", "Kantong Sampah ", "Kantong "):
@@ -3185,6 +3244,11 @@ async def _buat_po_stok(context, chat, pesanan):
 
 async def stok_job(context: ContextTypes.DEFAULT_TYPE):
     """Tiap hari (>= jam 08 WIB): kabarin barang yang stoknya menipis/habis."""
+    try:
+        import asyncio as _aio
+        await _aio.to_thread(_sheets().prefetch)
+    except Exception:
+        pass
     now = _wib_now()
     if now.hour < config.REMINDER_HOUR:
         return

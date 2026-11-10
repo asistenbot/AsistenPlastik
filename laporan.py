@@ -68,6 +68,10 @@ def _per_customer(inv, today):
 def hitung_laporan(sheets, bulan=None):
     """bulan: 'YYYY-MM' (default bulan ini WIB). Balikin dict siap di-JSON."""
     today = _wib_today()
+    try:
+        sheets.prefetch()   # semua tab 1x baca
+    except Exception:
+        pass
     semua = str(bulan or "").lower() == "semua"
     try:
         y, m = [int(x) for x in str(bulan).split("-")]

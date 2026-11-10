@@ -538,7 +538,7 @@ async def _do_lunas(update, key):
     if total is None:
         await update.effective_message.reply_text(f"Invoice {no_invoice} gak ketemu.")
         return
-    sheets.add_kas_entry("Masuk", "Penjualan", total, keterangan=f"Pelunasan {no_invoice}", ref=no_invoice)
+    sheets.add_kas_entry("Masuk", "Penjualan", total, keterangan=f"Pelunasan {no_invoice} (via /lunas Telegram)", ref=no_invoice)
     await update.effective_message.reply_text(
         f"✅ {no_invoice} ditandai *Lunas* ({rupiah(total)}), udah dicatat ke Kas Masuk.",
         parse_mode=ParseMode.MARKDOWN,
@@ -1885,7 +1885,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(f"{inv} udah gak Pending, gak diubah.")
             return
         total = sheets.mark_order_lunas(inv)
-        sheets.add_kas_entry("Masuk", "Penjualan", total, keterangan=f"Pelunasan {inv}", ref=inv)
+        sheets.add_kas_entry("Masuk", "Penjualan", total, keterangan=f"Pelunasan {inv} (via chat Telegram)", ref=inv)
         await query.edit_message_text(f"✅ {inv} ditandai Lunas ({rupiah(total)}), udah dicatat ke Kas Masuk.")
         await _kabar_komisi(context.bot, inv)
         return
@@ -1959,7 +1959,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not invs:
                 await query.edit_message_text("Udah kadaluarsa, buka /piutang lagi.")
                 return
-            hasil = await asyncio.to_thread(_sheets().lunas_banyak, invs)
+            hasil = await asyncio.to_thread(_sheets().lunas_banyak, invs, "/piutang Telegram")
             sel.clear()
             await query.edit_message_text(
                 f"✅ {len(hasil)} invoice {c['nama']} LUNAS, total {rupiah(sum(t for _, t in hasil))} masuk Kas:\n"
@@ -1975,7 +1975,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.effective_chat.send_message("Tombol udah dipakai / kadaluarsa. Cek ulang: /cektransfer <nominal>")
             return
         import asyncio
-        hasil = await asyncio.to_thread(_sheets().lunas_banyak, invs)
+        hasil = await asyncio.to_thread(_sheets().lunas_banyak, invs, "cek transfer Telegram")
         await query.edit_message_reply_markup(reply_markup=None)
         await update.effective_chat.send_message(
             f"✅ {len(hasil)} bon LUNAS ({rupiah(sum(t for _, t in hasil))}), dicatat Kas Masuk:\n" + "\n".join(f"• {n} {rupiah(t)}" for n, t in hasil)
@@ -2822,7 +2822,7 @@ async def _handle_reminder_callback(update, context, data):
             await query.edit_message_text(f"{ref} udah {status or 'gak ketemu'}, pengingatnya ditutup.")
             return
         total = sheets.mark_order_lunas(ref)
-        sheets.add_kas_entry("Masuk", "Penjualan", total, keterangan=f"Pelunasan {ref}", ref=ref)
+        sheets.add_kas_entry("Masuk", "Penjualan", total, keterangan=f"Pelunasan {ref} (via pengingat cek bayar Telegram)", ref=ref)
         await query.edit_message_text(f"✅ {ref} ({nama}) ditandai Lunas {rupiah(total)}, udah dicatat ke Kas Masuk.")
         await _kabar_komisi(context.bot, ref)
         return

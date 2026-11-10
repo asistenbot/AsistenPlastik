@@ -1178,7 +1178,7 @@ class SheetsClient:
 
     _lunas_lock = threading.Lock()
 
-    def lunas_banyak(self, invoices):
+    def lunas_banyak(self, invoices, via=""):
         """Customer transfer sekaligus: tandai banyak invoice Lunas + catat Kas Masuk
         per invoice (biar /batallunas tetap bisa). Balikin [(invoice, total)] yang berhasil."""
         hasil = []
@@ -1190,7 +1190,8 @@ class SheetsClient:
                 total = self.mark_order_lunas(no)
                 if total is None:
                     continue
-                self.add_kas_entry("Masuk", "Penjualan", total, keterangan=f"Pelunasan {no}", ref=no)
+                self.add_kas_entry("Masuk", "Penjualan", total,
+                                   keterangan=f"Pelunasan {no}" + (f" (via {via})" if via else ""), ref=no)
                 hasil.append((no, total))
         return hasil
 

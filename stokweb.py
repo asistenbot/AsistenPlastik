@@ -282,7 +282,7 @@ def add_stok_routes(app, sheets_getter, notify=None):
         if not rows or status != "Pending":
             return web.json_response({"ok": False, "error": f"{inv} sudah {status or 'tidak ketemu'}"})
         total = await asyncio.to_thread(sheets.mark_order_lunas, inv)
-        await asyncio.to_thread(sheets.add_kas_entry, "Masuk", "Penjualan", total, keterangan=f"Pelunasan {inv}", ref=inv)
+        await asyncio.to_thread(sheets.add_kas_entry, "Masuk", "Penjualan", total, keterangan=f"Pelunasan {inv} (via dashboard)", ref=inv)
         if notify is not None:
             try:
                 await notify("komisi", {"invoice": inv})
@@ -404,7 +404,7 @@ def add_stok_routes(app, sheets_getter, notify=None):
         if not await _link(request, ("@owner",)):
             return web.json_response({"ok": False}, status=404)
         invs = [str(x).strip()[:40] for x in ((await request.json()).get("invoices") or [])][:200]
-        hasil = await asyncio.to_thread(sheets_getter().lunas_banyak, invs)
+        hasil = await asyncio.to_thread(sheets_getter().lunas_banyak, invs, "dashboard")
         if notify is not None:
             for n, _ in hasil:
                 try:

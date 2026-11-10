@@ -305,7 +305,9 @@ def hitung_laporan(sheets, bulan=None):
         "kas_masuk_kat": [{"nama": k, "total": v} for k, v in _top(lap["masuk_by_kategori"])],
         "kas_keluar_kat": [{"nama": k, "total": v} for k, v in _top(lap["keluar_by_kategori"])],
         "customers": _per_customer(inv, today), "lunas_baru": sorted(
-            [{"invoice": o["invoice"], "customer": o["customer"], "tgl": o["tgl"], "bayar": o["bayar"], "total": o["total"]}
+            [{"invoice": o["invoice"], "customer": o["customer"], "tgl": o["tgl"], "bayar": o["bayar"], "total": o["total"],
+              "via": next((str(r.get("Keterangan", "")).split("(via ", 1)[1].rstrip(")") for r in kas
+                           if str(r.get("Ref", "")) == o["invoice"] and "(via " in str(r.get("Keterangan", ""))), "")}
              for o in inv.values() if o["status"] == "Lunas" and o["bayar"] >= (today - datetime.timedelta(days=7)).strftime("%Y-%m-%d")],
             key=lambda o: (o["bayar"], o["invoice"]), reverse=True),
         "kas_list": kas_list, "komisi_belum_list": komisi_belum, "komisi_setting": komisi_set, "web_list": web_menunggu, "belum_kirim_list": belum_kirim[:40],

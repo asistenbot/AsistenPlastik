@@ -374,6 +374,97 @@ def add_stok_routes(app, sheets_getter, notify=None):
         n = await asyncio.to_thread(_jalan)
         return web.json_response({"ok": bool(n), "n": len(ents)})
 
+    async def form_invoice(request):
+        """Data buat form Buat Invoice: customer + barang (harga katalog)."""
+        if not await _link(request, ("@owner",)):
+            return web.json_response({"ok": False}, status=404)
+        sheets = sheets_getter()
+
+        def _ambil():
+            cust = {}
+            for r in sheets.get_customers():
+                n = str(r.get("Nama", "")).strip()
+                if n:
+                    cust[n.lower()] = {"nama": n, "hp": str(r.get("No_HP", "") or ""), "alamat": str(r.get("Alamat", "") or "")}
+            stok = {i["code"].upper(): i for i in sheets.get_stok_all()}
+            barang = []
+            for p in sheets.get_price_list():
+                code = str(p.get("Item_Code", "")).strip()
+                if not code:
+                    continue
+                try:
+                    hj = float(p.get("Harga_Jual") or 0)
+                except (TypeError, ValueError):
+                    hj = 0
+                st = stok.get(code.upper(), {})
+                barang.append({"code": code, "nama": sheets._label_produk(p), "satuan": str(p.get("Satuan", "") or ""),
+                               "kategori": str(p.get("Kategori", "") or ""), "harga": hj, "stok": st.get("stok")})
+            barang.sort(key=lambda b: b["nama"].lower())
+            return sorted(cust.values(), key=lambda c: c["nama"].lower()), barang
+        cust, barang = await asyncio.to_thread(_ambil)
+        return web.json_response({"ok": True, "customers": cust, "barang": barang})
+
+    async def harga_cust(request):
+        if not await _link(request, ("@owner",)):
+            return web.json_response({"ok": False}, status=404)
+        nama = request.query.get("nama", "")[:80]
+        hk = await asyncio.to_thread(sheets_getter().get_harga_customer, nama) if nama.strip() else {}
+        return web.json_response({"ok": True, "harga": hk})
+
+    async def buat_invoice(request):
+        if not await _link(request, ("@owner",)):
+            return web.json_response({"ok": False}, status=404)
+        b = await request.json()
+        nama = str(b.get("nama", "")).strip()[:80]
+        if not nama:
+            return web.json_response({"ok": False, "error": "Nama customer belum diisi"})
+        items = []
+        for it in (b.get("items") or [])[:60]:
+            try:
+                qty = float(str(it.get("qty", "")).replace(",", "."))
+                harga = float(str(it.get("harga", "")).replace(",", "."))
+            except ValueError:
+                continue
+            nm = str(it.get("nama", "")).strip()[:150]
+            if not nm or qty <= 0 or harga < 0 or qty > 10_000_000:
+                continue
+            items.append({"item_code": str(it.get("code", "")).strip()[:40], "nama_item": nm,
+                          "kategori": str(it.get("kategori", ""))[:40], "qty": qty if qty != int(qty) else int(qty),
+                          "satuan": str(it.get("satuan", ""))[:20], "harga_satuan": harga if harga != int(harga) else int(harga)})
+        if not items:
+            return web.json_response({"ok": False, "error": "Belum ada barang (isi barang, jumlah & harga)"})
+        try:
+            ongkir = float(str(b.get("ongkir", "") or 0).replace(",", "."))
+        except ValueError:
+            ongkir = 0
+        tgl = str(b.get("tanggal", "") or "")[:10]
+        sheets = sheets_getter()
+        inv = await asyncio.to_thread(
+            sheets.add_order, nama, str(b.get("hp", ""))[:30], str(b.get("alamat", ""))[:200],
+            "Ambil" if b.get("metode") == "Ambil" else "Kirim", items, ongkir,
+            str(b.get("no_po", ""))[:40], str(b.get("tgl_kirim", ""))[:10],
+            tgl if len(tgl) == 10 else "", str(b.get("catatan", "") or "").strip()[:200])
+        if notify is not None:
+            try:
+                tot = sum(i["qty"] * i["harga_satuan"] for i in items) + ongkir
+                await notify("invoice_dashboard", {"invoice": inv, "customer": nama, "n": len(items), "total": tot,
+                                                   "codes": [i["item_code"] for i in items if i["item_code"]]})
+            except Exception:
+                logger.exception("gagal kabar invoice dashboard")
+        return web.json_response({"ok": True, "invoice": inv})
+
+    async def catatan_inv(request):
+        if not await _link(request, ("@owner",)):
+            return web.json_response({"ok": False}, status=404)
+        sheets = sheets_getter()
+        if request.method == "GET":
+            rows = await asyncio.to_thread(sheets.get_order_items, request.query.get("inv", "")[:40])
+            return web.json_response({"ok": bool(rows), "catatan": str((rows[0] if rows else {}).get("Catatan", "") or "")})
+        b = await request.json()
+        ok = await asyncio.to_thread(sheets.set_catatan_invoice, str(b.get("invoice", ""))[:40],
+                                     " ".join(str(b.get("catatan", "") or "").split())[:200])
+        return web.json_response({"ok": bool(ok)})
+
     async def tutup_po(request):
         if not await _link(request, ("@owner",)):
             return web.json_response({"ok": False}, status=404)
@@ -500,6 +591,11 @@ def add_stok_routes(app, sheets_getter, notify=None):
     app.router.add_post("/dashboard/{token}/popermintaan", po_permintaan)
     app.router.add_post("/dashboard/{token}/tutuppo", tutup_po)
     app.router.add_post("/dashboard/{token}/terimapo", terima_po)
+    app.router.add_get("/dashboard/{token}/forminvoice", form_invoice)
+    app.router.add_get("/dashboard/{token}/hargacust", harga_cust)
+    app.router.add_post("/dashboard/{token}/buatinvoice", buat_invoice)
+    app.router.add_get("/dashboard/{token}/catatan", catatan_inv)
+    app.router.add_post("/dashboard/{token}/catatan", catatan_inv)
     app.router.add_post("/dashboard/{token}/bayarkomisi", bayar_komisi)
     app.router.add_post("/dashboard/{token}/kirim", tandai_kirim)
     app.router.add_get("/dashboard/{token}/struk/{inv}", struk)

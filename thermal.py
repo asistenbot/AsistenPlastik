@@ -79,6 +79,9 @@ def struk_surat_jalan(sheets, no_invoice):
         add(q.rjust(LEBAR), b=True)
     add(garis)
     add(f"Jumlah: {len(rows)} macam barang")
+    if str(f.get("Catatan", "") or "").strip():
+        for ln in _baris("Catatan: " + str(f.get("Catatan"))):
+            add(ln)
     add("")
     add("  Penerima          Pengirim")
     add("")

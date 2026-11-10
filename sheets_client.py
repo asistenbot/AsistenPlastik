@@ -43,7 +43,7 @@ SCHEMA = {
         "Timestamp", "No_Invoice", "Nama_Customer", "No_HP", "Alamat",
         "Metode", "Item_Code", "Nama_Item", "Kategori", "Qty", "Satuan",
         "Harga_Satuan", "Subtotal", "Ongkir", "Status", "Tanggal_Bayar",
-        "No_PO_Customer", "Tanggal_Kirim",
+        "No_PO_Customer", "Tanggal_Kirim", "Catatan",
     ],
     config.SHEET_SUPPLIERS: ["Nama_Supplier", "No_HP", "Barang", "Alamat"],
     config.SHEET_PURCHASE_ORDERS: [
@@ -732,7 +732,7 @@ class SheetsClient:
         return self._records(self._ws(config.SHEET_ORDERS))
 
     def add_order(self, nama_customer, no_hp, alamat, metode, items, ongkir=0,
-                  no_po_customer="", tanggal_kirim="", tanggal_order=""):
+                  no_po_customer="", tanggal_kirim="", tanggal_order="", catatan=""):
         """items: list of dict {item_code, nama_item, kategori, qty, satuan,
         harga_satuan}. Nulis 1 baris per item, semuanya share No_Invoice yang
         sama. no_po_customer/tanggal_kirim opsional (referensi No. PO dari
@@ -761,6 +761,7 @@ class SheetsClient:
                     ongkir if idx == 0 else 0,  # ongkir cuma dicatat 1x di baris pertama
                     "Pending", "",
                     no_po_customer, tanggal_kirim,
+                    (catatan or "") if idx == 0 else "",
                 ])
             ws.append_rows(rows, value_input_option="RAW")
             self.add_customer_if_new(nama_customer, no_hp, alamat)
@@ -770,6 +771,23 @@ class SheetsClient:
         except Exception:
             logger.exception("gagal bikin pengingat invoice %s", no_invoice)
         return no_invoice
+
+    def set_catatan_invoice(self, no_invoice, catatan):
+        """Ganti catatan 1 invoice (disimpan di baris pertama invoice itu)."""
+        from gspread.utils import rowcol_to_a1
+        ws = self._ws(config.SHEET_ORDERS)
+        values = ws.get_all_values()
+        if not values or "Catatan" not in values[0]:
+            return False
+        h = values[0]
+        ci, cc = h.index("No_Invoice"), h.index("Catatan")
+        rows = [i for i, r in enumerate(values[1:], start=2) if len(r) > ci and r[ci] == no_invoice]
+        if not rows:
+            return False
+        data = [{"range": rowcol_to_a1(i, cc + 1), "values": [[(catatan or "") if k == 0 else ""]]}
+                for k, i in enumerate(rows)]
+        ws.batch_update(data, value_input_option="RAW")
+        return True
 
     def get_order_items(self, no_invoice):
         return [r for r in self.get_all_orders() if str(r.get("No_Invoice", "")) == no_invoice]

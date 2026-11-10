@@ -81,6 +81,15 @@ def _wrap(s, n):
     return textwrap.wrap(str(s or ""), n) or [""]
 
 
+def _catatan_lines(catatan, maks=3):
+    """Catatan invoice/surat jalan -> maks 3 baris (80 kolom)."""
+    c = " ".join(str(catatan or "").split())
+    if not c:
+        return []
+    out = textwrap.wrap(c, COLS - 10)[:maks]
+    return ["Catatan : " + out[0]] + ["          " + x for x in out[1:]]
+
+
 def _cell(text, w, al):
     text = str(text)
     if al == "l":
@@ -391,7 +400,7 @@ def _finish(pages):
 
 # ------------------------------------------------------------ public API
 def generate_invoice_dotmatrix(no_invoice, nama_customer, no_hp, alamat, metode, items,
-                               ongkir=0, no_po_customer="", tanggal_kirim="", tanggal=None):
+                               ongkir=0, no_po_customer="", tanggal_kirim="", tanggal=None, catatan=""):
     widths = [3, 33, 8, 6, 11, 14]            # + 5 spasi = 80 kolom
     aligns = ["c", "l", "r", "l", "r", "r"]
     head = ["NO", "NAMA BARANG", "QTY", "SAT", "HARGA(Rp)", "SUBTOTAL(Rp)"]
@@ -413,17 +422,19 @@ def generate_invoice_dotmatrix(no_invoice, nama_customer, no_hp, alamat, metode,
         return [_hl("-"),
                 tot("Subtotal", sub), tot("Ongkir", ongkir), tot("TOTAL", sub + ongkir),
                 _hl("="),
+                *_catatan_lines(catatan),
                 f"Transfer : {config.BANK_NAME} {config.BANK_ACCOUNT_NUMBER} a.n. {config.BANK_ACCOUNT_NAME}",
                 "Terima kasih atas kepercayaan Anda."]
 
     party = _party_lines(nama_customer, no_hp, alamat, metode, no_po_customer, tanggal_kirim)
     pages = _build("INVOICE", no_invoice, "Tgl : " + _tgl_label(tanggal),
-                   party, widths, aligns, head, groups, footer, 7)
+                   party, widths, aligns, head, groups, footer, 7 + len(_catatan_lines(catatan)))
     return _finish(pages)
 
 
 def generate_surat_jalan_dotmatrix(no_surat_jalan, nama_customer, no_hp, alamat, metode, items,
-                                   no_invoice_ref=None, no_po_customer="", tanggal_kirim="", tanggal=None):
+                                   no_invoice_ref=None, no_po_customer="", tanggal_kirim="", tanggal=None,
+                                   catatan=""):
     widths = [3, 53, 9, 7, 4]                 # + 4 spasi = 80 kolom
     aligns = ["c", "l", "r", "l", "c"]
     head = ["NO", "NAMA BARANG", "QTY", "SAT", "CEK"]
@@ -433,6 +444,7 @@ def generate_surat_jalan_dotmatrix(no_surat_jalan, nama_customer, no_hp, alamat,
     def footer(widths_, _n):
         return [_hl("-"),
                 f"Total jenis barang : {n_items}",
+                *_catatan_lines(catatan),
                 "Mohon periksa jumlah dan kondisi barang saat diterima.",
                 "Dikirim oleh,".ljust(22) + " " * 34 + "Diterima oleh,".ljust(24),
                 "", "",
@@ -442,5 +454,5 @@ def generate_surat_jalan_dotmatrix(no_surat_jalan, nama_customer, no_hp, alamat,
     ref = (f"Ref : {no_invoice_ref}   " if no_invoice_ref else "") + f"Tgl : {tgl}"
     party = _party_lines(nama_customer, no_hp, alamat, metode, no_po_customer, tanggal_kirim)
     pages = _build("SURAT JALAN", no_surat_jalan, ref, party, widths, aligns, head,
-                   groups, footer, 7)
+                   groups, footer, 7 + len(_catatan_lines(catatan)))
     return _finish(pages)

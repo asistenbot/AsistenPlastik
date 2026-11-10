@@ -21,7 +21,7 @@ def _hasil(sheets, no_invoice, kind):
         return None
     first = rows[0]
     common = dict(no_po_customer=first.get("No_PO_Customer", ""), tanggal_kirim=first.get("Tanggal_Kirim", ""),
-                  tanggal=first.get("Timestamp", ""))
+                  tanggal=first.get("Timestamp", ""), catatan=str(first.get("Catatan", "") or ""))
     if kind == "inv":
         items = [{"nama_item": r["Nama_Item"], "qty": r["Qty"], "satuan": r["Satuan"],
                   "harga_satuan": r["Harga_Satuan"]} for r in rows]
@@ -71,7 +71,7 @@ def bangun_pdf(sheets, no_invoice, kind):
         return None
     first = rows[0]
     common = dict(no_po_customer=first.get("No_PO_Customer", ""), tanggal_kirim=first.get("Tanggal_Kirim", ""),
-                  tanggal=first.get("Timestamp", ""))
+                  tanggal=first.get("Timestamp", ""), catatan=str(first.get("Catatan", "") or ""))
     if kind == "inv":
         items = [{"nama_item": r["Nama_Item"], "qty": r["Qty"], "satuan": r["Satuan"],
                   "harga_satuan": r["Harga_Satuan"]} for r in rows]

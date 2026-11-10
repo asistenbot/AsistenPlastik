@@ -813,6 +813,7 @@ async def _kirim_invoice(update, context, no_invoice):
         no_po_customer=first.get("No_PO_Customer", ""),
         tanggal_kirim=first.get("Tanggal_Kirim", ""),
         tanggal=first.get("Timestamp", ""),
+        catatan=str(first.get("Catatan", "") or ""),
     )
     await _kirim_dotmatrix(update, f"Invoice {no_invoice}", no_invoice, pages, txt, pdf, kunci="invoice")
 
@@ -832,6 +833,7 @@ async def _kirim_surat_jalan(update, context, no_invoice):
         no_po_customer=first.get("No_PO_Customer", ""),
         tanggal_kirim=first.get("Tanggal_Kirim", ""),
         tanggal=first.get("Timestamp", ""),
+        catatan=str(first.get("Catatan", "") or ""),
     )
     await _kirim_dotmatrix(update, f"Surat Jalan {no_sj}", no_sj, pages, txt, pdf, kunci="suratjalan")
 
@@ -3376,6 +3378,14 @@ async def _notify_staff_event(app, kind, data):
         text = f"🚚 {data['staff']} menandai {data['invoice']} ({data['customer']}) sudah dikirim."
     elif kind == "komisi":
         await _kabar_komisi(app.bot, data["invoice"])
+        return
+    elif kind == "invoice_dashboard":
+        try:
+            await _mirror(app.bot, "order", text=f"🛒 Order baru {data['invoice']} (dari dashboard)\n"
+                                                 f"{data['customer']} • {data['n']} item • {rupiah(data['total'])}")
+        except Exception:
+            logger.exception("gagal mirror invoice dashboard")
+        await _cek_stok_setelah_order(app, data.get("codes") or [])
         return
     elif kind == "diputuskan":
         # disetujui/ditolak dari dashboard -> ilangin tombol di semua pesan Telegram-nya

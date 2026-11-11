@@ -248,6 +248,20 @@ def hitung_laporan(sheets, bulan=None):
                                  "nama": str(r.get("Nama", "")), "n_item": n_item})
     except Exception:
         pass
+    tagih, tagih_menunggu = [], []
+    try:
+        for cst in sheets.get_tagihan_kirim().values():
+            due = [o for o in cst["invoices"] if o["due"]]
+            if due:
+                tagih.append({"kunci": cst["kunci"], "nama": cst["nama"], "total": sum(o["total"] for o in due),
+                              "invoices": [{k: o[k] for k in ("invoice", "kirim", "jatuh", "total", "tagih_tgl")} for o in due]})
+            for o in cst["invoices"]:
+                if o["jatuh"] and not o["due"]:
+                    tagih_menunggu.append({"invoice": o["invoice"], "nama": cst["nama"], "jatuh": o["jatuh"], "total": o["total"]})
+        tagih.sort(key=lambda t: min(o["jatuh"] for o in t["invoices"]))
+        tagih_menunggu.sort(key=lambda o: o["jatuh"])
+    except Exception:
+        pass
     belum_kirim = []
     try:
         for d in sheets.get_orders_gudang(300):
@@ -315,5 +329,6 @@ def hitung_laporan(sheets, bulan=None):
              for o in inv.values() if o["status"] == "Lunas" and o["bayar"] >= (today - datetime.timedelta(days=7)).strftime("%Y-%m-%d")],
             key=lambda o: (o["bayar"], o["invoice"]), reverse=True),
         "kas_list": kas_list, "komisi_belum_list": komisi_belum, "komisi_setting": komisi_set, "web_list": web_menunggu, "belum_kirim_list": belum_kirim[:40],
+        "tagih": tagih, "tagih_menunggu": tagih_menunggu, "tagih_hari": getattr(config, "TAGIH_SETELAH_KIRIM_HARI", 14),
         "belum_kirim_all": [d["invoice"] for d in belum_kirim], "stok_bermasalah": len(pernah),
     }

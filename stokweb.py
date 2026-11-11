@@ -489,6 +489,27 @@ def add_stok_routes(app, sheets_getter, notify=None):
         ok = await asyncio.to_thread(sheets_getter().set_tgl_kirim_invoice, str(b.get("invoice", ""))[:40], tgl)
         return web.json_response({"ok": bool(ok)})
 
+    async def surat_tagihan(request):
+        """PDF Surat Tagihan 1 customer: invoice yang udah jatuh tempo (?semua=1 -> semua yang belum lunas)."""
+        if not await _link(request, ("@owner",)):
+            return web.Response(status=404, text="Link tidak valid.")
+        k = request.query.get("k", "")
+        semua = request.query.get("semua") == "1"
+        import surattagihan
+
+        def _bikin():
+            cst = sheets_getter().get_tagihan_kirim().get(k)
+            if not cst:
+                return None
+            inv = cst["invoices"] if semua else [o for o in cst["invoices"] if o["due"]]
+            return surattagihan.buat_pdf(cst, inv or cst["invoices"]) if cst["invoices"] else None
+        hasil = await asyncio.to_thread(_bikin)
+        if not hasil:
+            return web.Response(status=404, text="Customer ini gak punya tagihan.")
+        nama, data = hasil
+        return web.Response(body=data, content_type="application/pdf",
+                            headers={"Content-Disposition": f'inline; filename="{nama}"', "Cache-Control": "no-store"})
+
     async def tutup_po(request):
         if not await _link(request, ("@owner",)):
             return web.json_response({"ok": False}, status=404)
@@ -621,6 +642,7 @@ def add_stok_routes(app, sheets_getter, notify=None):
     app.router.add_get("/dashboard/{token}/catatan", catatan_inv)
     app.router.add_post("/dashboard/{token}/catatan", catatan_inv)
     app.router.add_post("/dashboard/{token}/tglkirim", tgl_kirim)
+    app.router.add_get("/dashboard/{token}/surattagihan", surat_tagihan)
     app.router.add_post("/dashboard/{token}/bayarkomisi", bayar_komisi)
     app.router.add_post("/dashboard/{token}/kirim", tandai_kirim)
     app.router.add_get("/dashboard/{token}/struk/{inv}", struk)

@@ -9,6 +9,8 @@ Order masuk KAPAN AJA langsung diproses (gak ada siklus mingguan).
 Command lengkap ada di /start.
 """
 
+import datetime
+import io
 import functools
 import logging
 
@@ -2082,6 +2084,27 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _handle_reminder_callback(update, context, data)
         return
 
+    if data.startswith("tgh:"):
+        _, aksi, key = data.split(":", 2)
+        p = context.bot_data.get(key)
+        cap = (query.message.caption or "") if query.message else ""
+        if not p:
+            await query.edit_message_caption(caption=cap + "\n\n(Tombol kedaluwarsa — atur di dashboard → tab Tagihan.)")
+            return
+        if aksi == "ok":
+            hasil = _sheets().lunas_banyak(p["invoices"], via="tombol surat tagihan")
+            tot = sum(t for _, t in hasil)
+            await query.edit_message_caption(caption=cap + f"\n\n✅ {len(hasil)} invoice ditandai LUNAS • {rupiah(tot)} (masuk Kas).")
+        elif aksi == "lagi":
+            hari = getattr(config, "TAGIH_ULANG_HARI", 7)
+            tgl = (_wib_now() + datetime.timedelta(days=hari)).strftime("%Y-%m-%d")
+            _sheets().set_tagih(p["invoices"], None, tgl)
+            await query.edit_message_caption(caption=cap + f"\n\n🔁 Oke, kalau belum lunas gua ingetin lagi tanggal {tgl}.")
+        else:
+            await query.edit_message_caption(caption=cap + "\n\n👍 Siap. Kalau udah bayar, tandai lunas di dashboard / /piutang.")
+        context.bot_data.pop(key, None)
+        return
+
     if data == "order_cancel":
         context.user_data.pop("pending_order", None)
         await query.edit_message_text("Order dibatalin.")
@@ -2681,6 +2704,72 @@ async def reminder_job(context: ContextTypes.DEFAULT_TYPE):
                     sheets.update_reminder(r["ID"], Terkirim_Tgl=today)
             except Exception:
                 logger.exception("gagal nandain pengingat terkirim")
+
+
+def tagihan_due(sheets, today):
+    """Customer yang punya invoice belum lunas & udah waktunya ditagih (X hari setelah dikirim),
+    yang tagihannya belum dikirim bot (atau udah waktunya diingetin lagi)."""
+    out = []
+    for c in sheets.get_tagihan_kirim().values():
+        siap = [o for o in c["invoices"] if o["due"] and (
+            (not o["tagih_tgl"] and not o["tagih_lagi"]) or (o["tagih_lagi"] and o["tagih_lagi"] <= today))]
+        if siap:
+            # surat tagihan isinya semua invoice yang udah jatuh tempo (termasuk yang dulu udah ditagih)
+            out.append((c, [o for o in c["invoices"] if o["due"]], siap))
+    return out
+
+
+async def tagihan_job(context: ContextTypes.DEFAULT_TYPE):
+    """Tiap jam: invoice yang udah X hari sejak 'Sudah dikirim' & belum lunas -> kirim PDF Surat Tagihan ke owner."""
+    import asyncio as _aio
+    now = _wib_now()
+    if now.hour < config.REMINDER_HOUR:
+        return
+    today = now.strftime("%Y-%m-%d")
+    try:
+        sheets = _sheets()
+        daftar = await _aio.to_thread(tagihan_due, sheets, today)
+    except Exception:
+        logger.exception("gagal cek tagihan jatuh tempo")
+        return
+    if not daftar:
+        return
+    import surattagihan
+    chat_ids = list(dict.fromkeys(c for c in config.OWNER_TELEGRAM_IDS if c))
+    for cust, semua_due, siap in daftar:
+        try:
+            nama_file, pdf = surattagihan.buat_pdf(cust, semua_due, today)
+        except Exception:
+            logger.exception("gagal bikin surat tagihan %s", cust.get("nama"))
+            continue
+        tot = sum(o["total"] for o in semua_due)
+        key = f"tg{abs(hash((cust['kunci'], today))) % 10**8}"
+        context.bot_data[key] = {"invoices": [o["invoice"] for o in semua_due], "nama": cust["nama"]}
+        hari = getattr(config, "TAGIH_SETELAH_KIRIM_HARI", 14)
+        lines = [f"📨 WAKTUNYA NAGIH — {cust['nama']}", "",
+                 f"{len(semua_due)} invoice udah lewat {hari} hari sejak dikirim & belum lunas:"]
+        for o in semua_due[:10]:
+            lines.append(f"• {o['invoice']} • dikirim {o['kirim']} • {rupiah(o['total'])}")
+        if len(semua_due) > 10:
+            lines.append(f"• ...dan {len(semua_due) - 10} invoice lagi")
+        lines += ["", f"Total: {rupiah(tot)}", "", "PDF surat tagihan terlampir — tinggal teruskan ke customer 👆"]
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Udah lunas semua", callback_data=f"tgh:ok:{key}")],
+            [InlineKeyboardButton(f"🔁 Ingetin lagi {getattr(config, 'TAGIH_ULANG_HARI', 7)} hari", callback_data=f"tgh:lagi:{key}"),
+             InlineKeyboardButton("👍 Oke, gua tagih", callback_data=f"tgh:oke:{key}")]])
+        sent = False
+        for chat_id in chat_ids:
+            try:
+                await context.bot.send_document(chat_id=chat_id, document=io.BytesIO(pdf), filename=nama_file,
+                                                caption="\n".join(lines)[:1024], reply_markup=kb)
+                sent = True
+            except Exception:
+                logger.exception("gagal kirim surat tagihan ke %s", chat_id)
+        if sent:
+            try:
+                await _aio.to_thread(sheets.set_tagih, [o["invoice"] for o in siap], today, "")
+            except Exception:
+                logger.exception("gagal nandain tagihan terkirim")
 
 
 def _kb_digest_message(rems):
@@ -3560,6 +3649,7 @@ def main():
         app.job_queue.run_repeating(reminder_job, interval=600, first=45)
         app.job_queue.run_repeating(rekap_job, interval=3600, first=120)
         app.job_queue.run_repeating(stok_job, interval=3600, first=180)
+        app.job_queue.run_repeating(tagihan_job, interval=3600, first=240)
 
     logger.info("Starting polling...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)

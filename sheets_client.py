@@ -70,7 +70,7 @@ SCHEMA = {
                                 "Status", "Dibuat", "Dibayar"],
     config.SHEET_PENERIMAAN: ["No_PO", "Status", "Batch", "Staff", "Waktu", "Catatan", "Peta"],
     config.SHEET_PERMINTAAN: ["ID", "Waktu", "Staff", "Item_Code", "Nama", "Qty", "Satuan", "Catatan", "Status"],
-    config.SHEET_PENGIRIMAN: ["No_Invoice", "Status", "Staff", "Waktu"],
+    config.SHEET_PENGIRIMAN: ["No_Invoice", "Status", "Staff", "Waktu", "Tagih_Tgl", "Tagih_Lagi"],
     config.SHEET_LINKORDER: ["Token", "Nama_Customer", "Aktif", "Dibuat", "Catatan"],
     config.SHEET_PESANANWEB: ["ID", "Waktu", "Nama", "Payload", "Status"],
     config.SHEET_TAGIHAN: [
@@ -2378,6 +2378,65 @@ class SheetsClient:
                 ws.batch_update([{"range": f"A{i}:D{i}", "values": [[no_invoice, "Dikirim", staff, _now_str()]]}])
                 return
         ws.append_row([no_invoice, "Dikirim", staff, _now_str()], value_input_option="RAW")
+
+    def get_tagihan_kirim(self, hari=None):
+        """Piutang per customer + info kirim & jatuh tempo tagih (X hari setelah 'Sudah dikirim').
+        {kunci: {kunci, nama, hp, alamat, invoices:[{invoice,tgl,total,kirim,jatuh,due,tagih_tgl,tagih_lagi}]}}"""
+        hari = int(hari or getattr(config, "TAGIH_SETELAH_KIRIM_HARI", 14))
+        today = _today_str()
+        kirim = self.get_pengiriman_map()
+        inv, info = {}, {}
+        for r in self.get_pending_orders():
+            no = str(r.get("No_Invoice", "")).strip()
+            if not no:
+                continue
+            o = inv.setdefault(no, {"invoice": no, "nama": str(r.get("Nama_Customer", "-")).strip() or "-",
+                                    "tgl": str(r.get("Timestamp", ""))[:10], "total": 0.0})
+            o["total"] += self._f(r.get("Subtotal")) + self._f(r.get("Ongkir"))
+            info.setdefault(no, (str(r.get("No_HP", "") or ""), str(r.get("Alamat", "") or "")))
+        out = {}
+        for o in sorted(inv.values(), key=lambda o: (o["tgl"], o["invoice"])):
+            k = kirim.get(o["invoice"]) or {}
+            wk = str(k.get("Waktu", ""))[:10]
+            jatuh = ""
+            if wk:
+                try:
+                    jatuh = (datetime.datetime.strptime(wk, "%Y-%m-%d") + datetime.timedelta(days=hari)).strftime("%Y-%m-%d")
+                except ValueError:
+                    jatuh = ""
+            o.update(kirim=wk, jatuh=jatuh, due=bool(jatuh and jatuh <= today),
+                     tagih_tgl=str(k.get("Tagih_Tgl", "") or "")[:10], tagih_lagi=str(k.get("Tagih_Lagi", "") or "")[:10])
+            kc = _norm(o["nama"]) or "-"
+            c = out.setdefault(kc, {"kunci": kc, "nama": o["nama"], "hp": "", "alamat": "", "invoices": []})
+            hp, al = info.get(o["invoice"], ("", ""))
+            c["hp"], c["alamat"] = hp or c["hp"], al or c["alamat"]
+            c["invoices"].append(o)
+        return out
+
+    def set_tagih(self, invoices, tagih_tgl=None, tagih_lagi=None):
+        """Catat tagihan udah dikirim (Tagih_Tgl) / jadwal ingetin lagi (Tagih_Lagi) di tab PengirimanOrder."""
+        ws = self._ws(config.SHEET_PENGIRIMAN)
+        vals = ws.get_all_values()
+        if not vals:
+            return 0
+        h = vals[0]
+        for kol in ("Tagih_Tgl", "Tagih_Lagi"):
+            if kol not in h:
+                h.append(kol)
+                ws.update_cell(1, len(h), kol)
+        ct, cl = h.index("Tagih_Tgl"), h.index("Tagih_Lagi")
+        from gspread.utils import rowcol_to_a1
+        mau = set(invoices)
+        data = []
+        for i, row in enumerate(vals[1:], start=2):
+            if row and row[0] in mau:
+                if tagih_tgl is not None:
+                    data.append({"range": rowcol_to_a1(i, ct + 1), "values": [[tagih_tgl]]})
+                if tagih_lagi is not None:
+                    data.append({"range": rowcol_to_a1(i, cl + 1), "values": [[tagih_lagi]]})
+        if data:
+            ws.batch_update(data, value_input_option="RAW")
+        return len(data)
 
     def set_pengiriman_banyak(self, invoices, staff):
         """Tandai banyak invoice 'Dikirim' sekaligus (1x baca, 1x tulis)."""

@@ -353,9 +353,9 @@ if(!confirm('Masukin ke stok?\n'+E.map(e=>'• '+e.nama+': '+fmt(e.qty)).join('\
 const r=await (await fetch(B+'/terimapo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({po:p.po,entries:E,catatan:(box.querySelector('[data-tc]')||{}).value||''})})).json();
 alert(r.ok?'✅ '+r.n+' barang masuk stok.':(r.error||'Gagal'));b.disabled=false;loadStok();loadPend();loadLap();return}
 if(b.dataset.wa){const inv=b.dataset.wa,url=B+'/dok/'+encodeURIComponent(inv)+'/wa';const old=b.textContent;b.disabled=true;b.textContent='Nyiapin...';
-try{const bl=await (await fetch(url,{cache:'no-store'})).blob();const f=new File([bl],inv+'.png',{type:'image/png'});
+try{const bl=await (await fetch(url,{cache:'no-store'})).blob();const f=new File([bl],inv+'.jpg',{type:'image/jpeg'});
 if(navigator.canShare&&navigator.canShare({files:[f]})){try{await navigator.share({files:[f],title:'Invoice '+inv})}catch(e){}}
-else{const a=document.createElement('a');a.href=URL.createObjectURL(bl);a.download=inv+'.png';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>window.open(url,'_blank'),300)}}
+else{const a=document.createElement('a');a.href=URL.createObjectURL(bl);a.download=inv+'.jpg';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>window.open(url,'_blank'),300)}}
 catch(e){window.open(url,'_blank')}b.disabled=false;b.textContent=old;return}
 if(b.dataset.tk){const inv=b.dataset.tk;const nx=b.nextElementSibling;if(nx&&nx.classList.contains('tkbox')){nx.remove();return}
 let cur='';try{cur=(await (await fetch(B+'/catatan?inv='+encodeURIComponent(inv))).json()).tgl_kirim||''}catch(e){}

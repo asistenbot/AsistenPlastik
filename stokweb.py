@@ -310,7 +310,7 @@ def add_stok_routes(app, sheets_getter, notify=None):
             if not hasil:
                 return web.Response(status=404, text="Invoice tidak ketemu.")
             nama, data = hasil
-            return web.Response(body=data, content_type="image/png",
+            return web.Response(body=data, content_type="image/jpeg",
                                 headers={"Content-Disposition": f'inline; filename="{nama}"', "Cache-Control": "no-store"})
         from docbuild import bangun_pdf, bangun_txt
         if kind.endswith("txt"):

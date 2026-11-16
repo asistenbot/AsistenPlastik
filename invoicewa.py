@@ -223,8 +223,8 @@ def _layout(c, rows, draw=True):
     return y, top_card
 
 
-def generate_invoice_wa(sheets, no_invoice):
-    """Balikin (nama_file, bytes PNG) atau None."""
+def generate_invoice_wa(sheets, no_invoice, fmt="jpg"):
+    """Balikin (nama_file, bytes JPG/PNG) atau None."""
     rows = sheets.get_order_items(no_invoice)
     if not rows:
         return None
@@ -235,5 +235,8 @@ def generate_invoice_wa(sheets, no_invoice):
     c.rect(28, 28, W - 56, tinggi - 28, CARD, r=26)
     _layout(c, rows, draw=True)
     buf = io.BytesIO()
-    c.im.save(buf, "PNG", optimize=True)
-    return f"{no_invoice}.png", buf.getvalue()
+    if fmt == "png":
+        c.im.save(buf, "PNG", optimize=True)
+        return f"{no_invoice}.png", buf.getvalue()
+    c.im.save(buf, "JPEG", quality=92, optimize=True, subsampling=0)
+    return f"{no_invoice}.jpg", buf.getvalue()

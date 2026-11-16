@@ -818,6 +818,23 @@ async def _kirim_invoice(update, context, no_invoice):
         catatan=str(first.get("Catatan", "") or ""),
     )
     await _kirim_dotmatrix(update, f"Invoice {no_invoice}", no_invoice, pages, txt, pdf, kunci="invoice")
+    await _kirim_invoice_wa(update, sheets, no_invoice)
+
+
+async def _kirim_invoice_wa(update, sheets, no_invoice):
+    """Invoice versi WA (gambar JPG biru-putih) -- tinggal diteruskan ke customer."""
+    import asyncio as _aio
+    try:
+        import invoicewa
+        hasil = await _aio.to_thread(invoicewa.generate_invoice_wa, sheets, no_invoice)
+        if not hasil:
+            return
+        nama, data = hasil
+        await update.effective_message.reply_photo(
+            photo=io.BytesIO(data), filename=nama,
+            caption=f"📲 Invoice {no_invoice} versi WA — tinggal teruskan ke customer")
+    except Exception:
+        logger.exception("gagal kirim invoice WA %s", no_invoice)
 
 
 async def _kirim_surat_jalan(update, context, no_invoice):

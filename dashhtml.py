@@ -172,7 +172,7 @@ const fmt=n=>(Math.round(n*100)/100).toLocaleString('id-ID');
 const rp=n=>'Rp'+Math.round(n||0).toLocaleString('id-ID');
 const rps=n=>{n=n||0;const a=Math.abs(n);return a>=1e9?'Rp'+(n/1e9).toFixed(1).replace('.',',')+' M':a>=1e6?'Rp'+(n/1e6).toFixed(1).replace('.',',')+' jt':rp(n)};
 const dmy=s=>s?String(s).slice(8,10)+'-'+String(s).slice(5,7)+'-'+String(s).slice(0,4):'-';
-const TABS=[['ringkasan','🏠 Ringkasan'],['buat','➕ Buat Invoice'],['penjualan','📈 Penjualan'],['tagihan','🧾 Tagihan'],['utang','💸 Utang Supplier'],['customer','👥 Customer'],['kas','💰 Kas'],['stok','📦 Stok'],['gudang','🏭 Gudang']];
+const TABS=[['ringkasan','🏠 Ringkasan'],['buat','➕ Order / PO Customer'],['penjualan','📈 Penjualan'],['tagihan','🧾 Tagihan'],['utang','💸 Utang Supplier'],['customer','👥 Customer'],['kas','💰 Kas'],['stok','📦 Stok'],['gudang','🏭 Gudang']];
 let PEND=0;function drawTabs(){document.getElementById('tabs').innerHTML=TABS.map(t=>'<button data-t="'+t[0]+'" class="'+(t[0]==TAB?'on':'')+'">'+t[1]+(t[0]=='gudang'&&PEND?' <span class="pill p-belum">'+PEND+'</span>':'')+'</button>').join('')}drawTabs();
 function showTab(t){TAB=t;if(t=='buat')setTimeout(renderBuat,0);try{location.hash=t}catch(_){}document.querySelectorAll('.tabs button').forEach(b=>{b.classList.toggle('on',b.dataset.t==t);if(b.dataset.t==t&&b.scrollIntoView&&innerWidth<1180)try{b.scrollIntoView({block:'nearest',inline:'center'})}catch(_){}});document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('on',p.id=='p_'+t))}
 document.getElementById('tabs').onclick=e=>{const b=e.target.closest('button');if(b)showTab(b.dataset.t)};
@@ -405,17 +405,17 @@ document.getElementById('biLagi').onclick=()=>{BI=null;BR=[];renderBuat()};retur
 if(!FI){P.innerHTML='<div class="empty">Ngambil data customer & barang...</div>';try{FI=await (await fetch(B+'/forminvoice')).json()}catch(e){FI=null}if(!FI||!FI.ok){FI=null;P.innerHTML='<div class="empty">Gagal ambil data, coba refresh.</div>';return}}
 if(!BR.length)BR=[{}];
 const today=new Date(Date.now()+7*3600e3).toISOString().slice(0,10);
-P.innerHTML='<h2 style="margin-top:4px">Buat invoice baru</h2><div class="box fi">'+
+P.innerHTML='<h2 style="margin-top:4px">Order baru / PO customer</h2><div class="mut" style="margin:-4px 2px 10px">Abis disimpan otomatis jadi invoice + surat jalan. Alamat, HP & tanggal kirim boleh nyusul.</div><div class="box fi">'+
 '<label>Customer</label><input id="fiN" list="fiCL" placeholder="ketik nama customer..." autocomplete="off"><datalist id="fiCL">'+FI.customers.map(c=>'<option value="'+esc(c.nama)+'">').join('')+'</datalist>'+
 '<div id="fiHK" class="mut" style="margin:2px 0 6px"></div>'+
 '<div class="fg"><div><label>No HP</label><input id="fiH" inputmode="tel"></div><div><label>Kirim / ambil</label><select id="fiM"><option>Kirim</option><option>Ambil</option></select></div></div>'+
 '<label>Alamat</label><input id="fiA">'+
-'<div class="fg"><div><label>No. PO customer <small>(kalau ada)</small></label><input id="fiPO"></div><div><label>Tanggal kirim <small>(kalau ada)</small></label><input id="fiTK" type="date"></div></div>'+
+'<div class="fg"><div><label>No. PO customer</label><input id="fiPO"></div><div><label>Tanggal kirim <small>(kalau ada)</small></label><input id="fiTK" type="date"></div></div>'+
 '<label>Catatan <small>(ikut kecetak di invoice & surat jalan, boleh kosong)</small></label><textarea id="fiC" rows="2" maxlength="200" placeholder="mis. barang dikirim 2x / pembayaran tempo 30 hari"></textarea>'+
 '<div class="fg"><div><label>Tanggal invoice</label><input id="fiT" type="date" value="'+today+'"></div><div><label>Ongkir</label><input id="fiO" inputmode="numeric" placeholder="0"></div></div></div>'+
 '<h2>Barang</h2><datalist id="fiBL">'+FI.barang.map(b=>'<option value="'+esc(b.nama)+' ['+esc(b.code)+']">').join('')+'</datalist><div id="fiRows"></div>'+
 '<button class="btn k" id="fiAdd" style="margin-top:4px">➕ Tambah barang</button>'+
-'<div class="fitot"><span>Total</span><b id="fiTot">Rp0</b></div><button class="btn" id="fiGo" style="width:100%;padding:14px;font-size:16px">💾 Simpan invoice</button><div class="mut" style="margin-top:8px;text-align:center">Abis disimpan bisa langsung cetak invoice & surat jalan.</div>';
+'<div class="fitot"><span>Total</span><b id="fiTot">Rp0</b></div><button class="btn" id="fiGo" style="width:100%;padding:14px;font-size:16px">💾 Simpan order</button><div class="mut" style="margin-top:8px;text-align:center">Abis disimpan bisa langsung cetak invoice & surat jalan.</div>';
 const $=id=>document.getElementById(id);
 const rows=()=>{$('fiRows').innerHTML=BR.map((r,i)=>'<div class="box fir" data-r="'+i+'"><div class="firh"><input class="fb" data-i="'+i+'" list="fiBL" placeholder="cari barang (nama / ukuran)..." value="'+esc(r.label||'')+'" autocomplete="off"><button class="btn s k" data-del="'+i+'" title="Hapus">✕</button></div>'+
 '<div class="mut fiinfo" style="margin:2px 0 4px">'+info(r)+'</div>'+
@@ -441,8 +441,8 @@ const t=it.reduce((a,x)=>a+x.qty*x.harga,0)+pnum($('fiO').value);
 if(!confirm('Simpan invoice buat '+nama+'?\n\n'+it.map(x=>'• '+x.nama+': '+fmt(x.qty)+' '+x.satuan+' × '+rp(x.harga)).join('\n')+'\n\nTotal '+rp(t)))return;
 $('fiGo').disabled=true;$('fiGo').textContent='Nyimpen...';
 try{const r=await (await fetch(B+'/buatinvoice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nama,hp:$('fiH').value,alamat:$('fiA').value,metode:$('fiM').value,no_po:$('fiPO').value,tgl_kirim:$('fiTK').value,tanggal:$('fiT').value==today?'':$('fiT').value,catatan:$('fiC').value,ongkir:pnum($('fiO').value),items:it})})).json();
-if(!r.ok){alert(r.error||'Gagal');$('fiGo').disabled=false;$('fiGo').textContent='💾 Simpan invoice';return}
-BI={inv:r.invoice,nama,tot:t};FI=null;BR=[];renderBuat();scrollTo(0,0);loadLap()}catch(e){alert('Gagal nyimpen, cek koneksi lalu coba lagi.');$('fiGo').disabled=false;$('fiGo').textContent='💾 Simpan invoice'}};
+if(!r.ok){alert(r.error||'Gagal');$('fiGo').disabled=false;$('fiGo').textContent='💾 Simpan order';return}
+BI={inv:r.invoice,nama,tot:t};FI=null;BR=[];renderBuat();scrollTo(0,0);loadLap()}catch(e){alert('Gagal nyimpen, cek koneksi lalu coba lagi.');$('fiGo').disabled=false;$('fiGo').textContent='💾 Simpan order'}};
 rows()}
 /* ---------- stok & gudang ---------- */
 function stokTxt(i){if(i.stok===null)return '-';let t=fmt(i.stok)+' '+esc(i.satuan)+(i.estimasi?' <small title="belum ada Hitung Stok awal">(sementara)</small>':'');if(i.isi_bal>0&&i.stok>=i.isi_bal)t+=' <small>('+(Math.round(i.stok/i.isi_bal*10)/10)+' bal)</small>';return t}

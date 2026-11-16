@@ -145,6 +145,9 @@ Aturan penting:
 - Ongkir default 0 kecuali disebutin jelas nominalnya.
 - no_po_customer & tanggal_kirim itu OPSIONAL -- JANGAN mengarang, kosongin
   kalau memang gak disebut/gak keliatan di teks atau foto.
+- Alamat, no HP, no PO & tanggal kirim boleh kosong. Kalau admin bilang
+  "nyusul", "menyusul", "belum ada", "nanti", "TBA", "-" buat field itu,
+  isi string KOSONG (jangan tulis kata "nyusul" sebagai alamat/tanggal).
 - Jangan hitung subtotal/total, itu dihitung sistem lain.
 """
 

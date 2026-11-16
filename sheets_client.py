@@ -48,7 +48,7 @@ SCHEMA = {
     config.SHEET_SUPPLIERS: ["Nama_Supplier", "No_HP", "Barang", "Alamat"],
     config.SHEET_PURCHASE_ORDERS: [
         "Timestamp", "No_PO", "Nama_Supplier", "Item", "Qty", "Satuan",
-        "Harga_Satuan", "Subtotal", "Status", "Tanggal_Lunas",
+        "Harga_Satuan", "Subtotal", "Status", "Tanggal_Lunas", "Catatan",
     ],
     config.SHEET_UTANG_SUPPLIER: [
         "Tanggal", "Nama_Supplier", "No_PO", "Jenis", "Jumlah",
@@ -1291,7 +1291,7 @@ class SheetsClient:
             pass
         return nama
 
-    def add_purchase_order(self, nama_supplier, items):
+    def add_purchase_order(self, nama_supplier, items, catatan=""):
         """items: list of dict {nama_item, qty, satuan, harga_satuan}.
         Nulis 1 baris per item dgn No_PO yang sama, status Belum Lunas,
         dan otomatis nambah entry 'Utang Baru' ke UtangSupplier.
@@ -1309,7 +1309,7 @@ class SheetsClient:
                 rows.append([
                     ts, no_po, nama_supplier, it["nama_item"], it["qty"],
                     it.get("satuan", ""), it["harga_satuan"], subtotal,
-                    "Belum Lunas", "",
+                    "Belum Lunas", "", (catatan or "") if not rows else "",
                 ])
             ws.append_rows(rows, value_input_option="RAW")
             self.add_supplier_if_new(nama_supplier)
@@ -2008,8 +2008,10 @@ class SheetsClient:
         for r in self._po_terbuka_rows():
             no = str(r["No_PO"]).strip()
             d = out.setdefault(no, {"po": no, "supplier": str(r.get("Nama_Supplier", "")),
-                                    "tgl": str(r.get("Timestamp", ""))[:10], "items": [],
+                                    "tgl": str(r.get("Timestamp", ""))[:10], "items": [], "catatan": "",
                                     "menunggu": no in menunggu, "ditutup": no in ditutup})
+            if str(r.get("Catatan", "") or "").strip() and not d["catatan"]:
+                d["catatan"] = str(r.get("Catatan")).strip()
             nama = str(r.get("Item", ""))
             p = self._cocok_produk(nama, produk)
             code = str(p["Item_Code"]).strip() if p else ""

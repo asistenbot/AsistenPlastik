@@ -450,9 +450,18 @@ def generate_surat_jalan_image(no_surat_jalan, nama_customer, no_hp, alamat, met
     return _output(cv, y + 10)
 
 
-def generate_po_image(no_po, nama_supplier, items):
+def _wrap_simple(teks, lebar):
+    import textwrap
+    out = []
+    for par in str(teks or "").replace(";", "\n").splitlines():
+        out += textwrap.wrap(par.strip(), lebar) if par.strip() else []
+    return out[:12]
+
+
+def generate_po_image(no_po, nama_supplier, items, catatan=""):
     """items: list of dict {nama_item, qty, satuan, harga_satuan}"""
-    cv = _canvas_for(len(items))
+    cat_lines = _wrap_simple(catatan, 95) if str(catatan or "").strip() else []
+    cv = _canvas_for(len(items), extra=(40 + 26 * len(cat_lines)) if cat_lines else 0)
     y = _header(cv, "PURCHASE ORDER", no_po, _now_tanggal())
 
     y = _party_block(cv, y, "KEPADA SUPPLIER", nama_supplier, "", "", max_w=WIDTH - 2 * MARGIN) + 26
@@ -478,6 +487,13 @@ def generate_po_image(no_po, nama_supplier, items):
 
     y += 26
     y = _total_block(cv, y, [], "TOTAL", rupiah(total)) + 34
+    if cat_lines:
+        cv.text(MARGIN, y, "CATATAN:", "bold", 15, INK)
+        y += 26
+        for ln in cat_lines:
+            cv.text(MARGIN, y, ln, "reg", 15, INK)
+            y += 26
+        y += 14
     y = _footer(cv, y, "Mohon konfirmasi ketersediaan barang. Terima kasih.")
     return _output(cv, y + 10)
 

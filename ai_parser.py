@@ -245,10 +245,14 @@ Balikin HANYA JSON dengan struktur persis seperti ini, tanpa teks lain:
   "items": [
     {{"item_code": "KODE_DARI_KATALOG, kosong string kalau BENERAN gak ketemu match apapun", "nama_item": "nama PERSIS sesuai katalog kalau item_code ketemu, atau apa yang ditulis admin kalau gak ketemu", "qty": angka, "satuan": "sesuai katalog kalau ketemu, atau tebakan kalau gak ketemu", "harga_satuan": angka harga beli per satuan}}
   ],
-  "catatan": "catatan kalau ada yang ambigu / item_code kosong, kalau tidak ada string kosong"
+  "catatan_po": "instruksi/keterangan BUAT SUPPLIER yang ditulis admin (mis. pembagian warna sablon 'Sablon orange 5.000 pcs, sablon pink 5.000 pcs', warna plastik, ukuran khusus, tanggal kirim, dll) -- tulis rapi & lengkap, string kosong kalau gak ada",
+  "catatan": "catatan buat ADMIN kalau ada yang ambigu / item_code kosong, kalau tidak ada string kosong"
 }}
 
 Aturan penting:
+0. Kalau admin nulis "catatan"/"note"/"ket" atau rincian kayak pembagian
+   warna sablon ("sablon orange 5000, sablon pink 5000"), itu masuk
+   "catatan_po" -- BUKAN item baru (qty item tetap total, mis. 10.000 pcs).
 1. item_code & nama_item WAJIB dicocokin ke KATALOG di atas kalau memang ada
    yang cocok -- JANGAN nulis ulang/gabung sendiri nama & ukuran barang dari
    tebakan kamu (contoh SALAH: admin nyebut "uk 90" lalu qty "100kg"

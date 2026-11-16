@@ -163,6 +163,9 @@ def _po_preview_text(parsed):
         lines.append(f"• {it.get('nama_item')} x{it.get('qty')} {it.get('satuan', '')} @ {rupiah(harga)} = {rupiah(subtotal)}{flag}")
     lines.append("")
     lines.append(f"*Total belanja: {rupiah(total)}*")
+    if parsed.get("catatan_po"):
+        lines.append("")
+        lines.append(f"🗒️ *Catatan PO (ikut dicetak):* {parsed['catatan_po']}")
     if parsed.get("catatan"):
         lines.append("")
         lines.append(f"📝 Catatan AI: {parsed['catatan']}")
@@ -2422,13 +2425,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("PO-nya udah gak ada / kadaluarsa, coba /po lagi.")
             return
         sheets = _sheets()
-        no_po, total = sheets.add_purchase_order(parsed.get("nama_supplier", "-"), parsed["items"])
+        no_po, total = sheets.add_purchase_order(parsed.get("nama_supplier", "-"), parsed["items"],
+                                                 catatan=str(parsed.get("catatan_po", "") or "").strip())
         context.user_data["last_po"] = no_po
         await query.edit_message_text(
             f"✅ PO *{no_po}* disimpan ({rupiah(total)}), otomatis nambah utang ke supplier ini.",
             parse_mode=ParseMode.MARKDOWN,
         )
-        img, pdf = documents.generate_po_image(no_po, parsed.get("nama_supplier", "-"), parsed["items"])
+        img, pdf = documents.generate_po_image(no_po, parsed.get("nama_supplier", "-"), parsed["items"],
+                                               catatan=str(parsed.get("catatan_po", "") or "").strip())
         await update.effective_chat.send_photo(photo=img, caption=f"Purchase Order {no_po}")
         await update.effective_chat.send_document(
             document=pdf, filename=f"{no_po}.pdf", caption="Versi PDF (siap print A4)"

@@ -691,6 +691,20 @@ class SheetsClient:
                 [nama, no_hp, alamat], value_input_option="RAW"
             )
 
+    def simpan_customer(self, nama, no_hp="", alamat=""):
+        """Tambah customer baru / lengkapin data customer lama (HP & alamat yang diisi aja).
+        Invoice customer ini yang belum lunas ikut keupdate. -> (baru: bool, n_invoice_keupdate)"""
+        nama = " ".join(str(nama or "").split())
+        if not nama:
+            return False, 0
+        lama = self.get_customer(nama)
+        if lama:
+            nama = str(lama.get("Nama", nama)).strip() or nama
+        else:
+            self.add_customer_if_new(nama, (no_hp or "").strip(), (alamat or "").strip())
+        n = self.update_customer(nama, no_hp=no_hp, alamat=alamat) if (lama and ((no_hp or "").strip() or (alamat or "").strip())) else 0
+        return (not lama), n
+
     # ---------------- NOMOR DOKUMEN ----------------
 
     def _next_number(self, prefix, existing_numbers, tanggal=None, seq_start=None):

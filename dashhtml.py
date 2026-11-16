@@ -120,6 +120,7 @@ em.bdg{font-style:normal;font-size:11px;font-weight:700;border-radius:999px;padd
 @media(max-width:420px){.fg3{grid-template-columns:1fr 1fr}.fg3>div:last-child{grid-column:1/-1}}
 .tkbox{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;margin:4px 0;padding:6px 8px;background:var(--blu2);border-radius:10px}.tkbox input{padding:6px 8px;border:1px solid var(--ln2);border-radius:8px;font:inherit;font-size:14px}
 .btn.wa{background:#25D366;color:#fff}.btn.wa:hover{background:#1EBE5A}
+.cdr{display:flex;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--ln)}.cdi{flex:1;min-width:0}.cdi .mut{font-size:13px;overflow:hidden;text-overflow:ellipsis}.cf{background:var(--sf2);border-radius:12px;padding:4px 12px 12px;margin:8px 0}
 #phead{display:none}
 @media print{
 html,body{background:#fff!important;color:#000!important;display:block!important}.card,.box,table,th,td,.cards,.empty,.act{background:#fff!important;color:#000!important}.card b,.mut,.mut b,th,small,.card span{color:#000!important}.hb .t i,.vc i{background:#333!important;box-shadow:none!important}.todo{display:none}
@@ -270,7 +271,16 @@ h+=L.kas_list.length?'<table><thead><tr><th>Tanggal</th><th>Keterangan</th><th c
 document.getElementById('p_kas').innerHTML=h}
 
 let CPER='semua';
+let CDB=null;
+async function dataCust(force){if(!CDB||force){try{const r=await (await fetch(B+'/forminvoice')).json();CDB=r.ok?r.customers:[]}catch(e){CDB=CDB||[]}}return CDB}
+function custForm(c){c=c||{};return '<div class="fi cf"><label>Nama customer</label><input class="cfN" value="'+esc(c.nama||'')+'"'+(c.nama?' readonly style="background:var(--sf2)"':' placeholder="mis. Hanam"')+'>'+
+'<div class="fg"><div><label>No HP <small>(boleh nyusul)</small></label><input class="cfH" inputmode="tel" value="'+esc(c.hp||'')+'"></div><div><label>Alamat <small>(boleh nyusul)</small></label><input class="cfA" value="'+esc(c.alamat||'')+'"></div></div>'+
+'<div style="display:flex;gap:6px;margin-top:10px"><button class="btn s" data-cfsave>💾 Simpan</button><button class="btn s k" data-cfx>Batal</button></div></div>'}
+async function drawCustDB(){const el=document.getElementById('cdb');if(!el)return;el.innerHTML='<div class="mut">Ngambil data...</div>';const D=await dataCust();
+const q=(document.getElementById('cdbq')||{}).value||'';const ql=q.toLowerCase();const L2=D.filter(c=>c.nama.toLowerCase().includes(ql));const kosong=D.filter(c=>!c.alamat).length;
+el.innerHTML=(kosong?'<div class="mut" style="margin:4px 0 8px">⚠️ '+kosong+' customer alamatnya belum ada</div>':'')+L2.slice(0,60).map(c=>'<div class="cdr"><div class="cdi"><b>'+esc(c.nama)+'</b><div class="mut">'+(c.hp?esc(c.hp):'<span style="color:var(--amb)">HP belum ada</span>')+' • '+(c.alamat?esc(c.alamat):'<span style="color:var(--amb)">alamat belum ada</span>')+'</div></div><button class="btn s k" data-cfe="'+esc(c.nama)+'">✏️ Edit</button></div><div class="cfslot"></div>').join('')+(L2.length>60?'<div class="mut">...ketik nama buat nyari</div>':'')+(!L2.length?'<div class="empty">Gak ketemu.</div>':'')}
 function renderCustomer(){const C=L.customers||[];let h='';
+h+='<h2 style="margin-top:4px">📇 Data customer</h2><div class="box"><div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><button class="btn s" data-cfadd>➕ Tambah customer</button><input type="search" id="cdbq" placeholder="cari customer buat edit HP / alamat..." style="flex:1;min-width:180px;margin:0"></div><div id="cfnew"></div><div id="cdb" style="margin-top:8px"></div></div>';
 h+='<h2>⚠️ Ditandai LUNAS 7 hari terakhir</h2><div class="mut" style="margin-bottom:4px">Cek di sini kalau ada yang kepencet lunas. Klik ↩️ buat balikin jadi belum lunas (Kas Masuk-nya ikut dihapus).</div>'+
 ((L.lunas_baru||[]).length?'<table><thead><tr><th>Invoice</th><th class="n">Total</th></tr></thead><tbody>'+L.lunas_baru.map(o=>'<tr><td><b>'+esc(o.customer)+'</b><br><small style="color:var(--mu)">'+esc(o.invoice)+' • invoice '+dmy(o.tgl)+' • <b>lunas '+dmy(o.bayar)+'</b>'+(o.via?' • lewat '+esc(o.via):'')+'</small><div style="margin-top:4px"><button class="btn s r" data-bl="'+esc(o.invoice)+'" data-n="'+esc(o.customer)+'" data-j="'+o.total+'">↩️ Batal lunas</button></div></td><td class="n">'+rp(o.total)+'</td></tr>').join('')+'</tbody></table>':'<div class="empty">Gak ada.</div>');
 const per=CPER=='semua'||L.bulan=='semua'?'':L.bulan;
@@ -284,7 +294,7 @@ document.getElementById('clist').innerHTML=data.filter(c=>c.nama.toLowerCase().i
 '<div style="padding:0 12px 12px"><div class="cards">'+card('Total belanja',rps(c.tot),'blu',c.inv.length+' invoice')+card('Sudah bayar',rps(c.tot-c.bel),'grn')+card('Belum bayar',rps(c.bel),c.bel>0?'red':'grn')+'</div>'+
 '<div style="font-weight:600;margin:8px 0 4px">📦 Barang yang dipesan</div>'+c.brg.map(b=>'<div class="hb"><div class="l" title="'+esc(b.nama)+'">'+esc(b.nama)+'</div><div class="v" style="min-width:auto">'+fmt(b.qty)+' '+esc(b.sat)+'</div><div class="v">'+rp(b.sub)+'</div></div>').join('')+
 '<div style="font-weight:600;margin:10px 0 4px">🧾 Invoice</div>'+c.inv.map(o=>'<div style="padding:6px 0;border-bottom:1px solid var(--ln)"><div style="display:flex;gap:6px;align-items:center"><span>'+(o.status=='Lunas'?'✅':'⏳')+'</span><span style="flex:1"><b>'+esc(o.invoice)+'</b> <small style="color:var(--mu)">'+dmy(o.tgl)+'</small></span><b>'+rp(o.total)+'</b></div><div class="mut">'+esc(o.items.map(it=>it.nama+' x'+fmt(it.qty)+' '+it.satuan).join(', '))+'</div><div style="margin-top:4px">'+(o.status=='Lunas'?'<span class="pill p-sudah">Lunas '+dmy(o.bayar)+'</span> <button class="btn s r" data-bl="'+esc(o.invoice)+'" data-n="'+esc(c.nama)+'" data-j="'+o.total+'">↩️ Batal lunas</button>':'<span class="pill p-belum">Belum lunas</span> <button class="btn s" data-lunas="'+esc(o.invoice)+'" data-n="'+esc(c.nama)+'" data-j="'+o.total+'">✅ Lunas</button>')+' '+dok(o.invoice)+'</div></div>').join('')+'</div></details>').join('')||'<div class="empty">Gak ada data.</div>'};
-draw();document.getElementById('ccari').oninput=draw}
+draw();document.getElementById('ccari').oninput=draw;drawCustDB();document.getElementById('cdbq').oninput=()=>{clearTimeout(window._cq);window._cq=setTimeout(drawCustDB,200)}}
 let MODE='';async function loadLap(){const bl=MODE||document.getElementById('bln').value;document.getElementById('semuaBln').style.background=MODE?'var(--blu)':'';document.getElementById('semuaBln').style.color=MODE?'#fff':'';try{const r=await fetch(B+'/laporan?bulan='+encodeURIComponent(bl));const j=await r.json();if(!j.ok)throw 0;L=j;if(!bl&&j.bulan!='semua')document.getElementById('bln').value=j.bulan;
 renderRingkasan();renderPenjualan();renderTagihan();renderUtang();renderKas();renderCustomer()}catch(e){document.getElementById('p_ringkasan').innerHTML='<div class="box">Gagal ambil laporan. Coba refresh sebentar lagi (Google Sheets lagi sibuk).</div>'}}
 document.getElementById('bln').onchange=()=>{MODE='';loadLap()};document.getElementById('semuaBln').onclick=()=>{MODE=MODE?'':'semua';loadLap()};
@@ -357,6 +367,13 @@ try{const bl=await (await fetch(url,{cache:'no-store'})).blob();const f=new File
 if(navigator.canShare&&navigator.canShare({files:[f]})){try{await navigator.share({files:[f],title:'Invoice '+inv})}catch(e){}}
 else{const a=document.createElement('a');a.href=URL.createObjectURL(bl);a.download=inv+'.jpg';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>window.open(url,'_blank'),300)}}
 catch(e){window.open(url,'_blank')}b.disabled=false;b.textContent=old;return}
+if(b.dataset.cfadd!==undefined){const s=document.getElementById('cfnew');s.innerHTML=s.innerHTML?'':custForm();const i=s.querySelector('.cfN');i&&i.focus();return}
+if(b.dataset.cfe){const slot=b.closest('.cdr').nextElementSibling;if(slot.innerHTML){slot.innerHTML='';return}const c=(CDB||[]).find(x=>x.nama==b.dataset.cfe)||{nama:b.dataset.cfe};slot.innerHTML=custForm(c);return}
+if(b.dataset.cfx!==undefined){b.closest('.cf').remove();return}
+if(b.dataset.cfsave!==undefined){const f=b.closest('.cf');const nama=f.querySelector('.cfN').value.trim();if(!nama){alert('Isi nama customer dulu.');return}b.disabled=true;
+const r=await (await fetch(B+'/customer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nama,hp:f.querySelector('.cfH').value,alamat:f.querySelector('.cfA').value})})).json();
+if(!r.ok){alert(r.error||'Gagal');b.disabled=false;return}alert(r.baru?'✅ Customer '+nama+' ditambahin.':'✅ Data '+nama+' disimpan'+(r.n_invoice?' + '+r.n_invoice+' invoice belum lunas ikut keupdate.':'.'));
+f.remove();FI=null;await dataCust(true);drawCustDB();return}
 if(b.dataset.tk){const inv=b.dataset.tk;const nx=b.nextElementSibling;if(nx&&nx.classList.contains('tkbox')){nx.remove();return}
 let cur='';try{cur=(await (await fetch(B+'/catatan?inv='+encodeURIComponent(inv))).json()).tgl_kirim||''}catch(e){}
 const iso=/^\d{4}-\d{2}-\d{2}$/.test(cur)?cur:'';const sp=document.createElement('span');sp.className='tkbox';

@@ -510,6 +510,17 @@ def add_stok_routes(app, sheets_getter, notify=None):
         return web.Response(body=data, content_type="application/pdf",
                             headers={"Content-Disposition": f'inline; filename="{nama}"', "Cache-Control": "no-store"})
 
+    async def simpan_cust(request):
+        if not await _link(request, ("@owner",)):
+            return web.json_response({"ok": False}, status=404)
+        b = await request.json()
+        nama = str(b.get("nama", "")).strip()[:80]
+        if not nama:
+            return web.json_response({"ok": False, "error": "Nama customer belum diisi"})
+        baru, n = await asyncio.to_thread(sheets_getter().simpan_customer, nama,
+                                          str(b.get("hp", "") or "")[:30], str(b.get("alamat", "") or "")[:200])
+        return web.json_response({"ok": True, "baru": baru, "n_invoice": n})
+
     async def tutup_po(request):
         if not await _link(request, ("@owner",)):
             return web.json_response({"ok": False}, status=404)
@@ -643,6 +654,7 @@ def add_stok_routes(app, sheets_getter, notify=None):
     app.router.add_post("/dashboard/{token}/catatan", catatan_inv)
     app.router.add_post("/dashboard/{token}/tglkirim", tgl_kirim)
     app.router.add_get("/dashboard/{token}/surattagihan", surat_tagihan)
+    app.router.add_post("/dashboard/{token}/customer", simpan_cust)
     app.router.add_post("/dashboard/{token}/bayarkomisi", bayar_komisi)
     app.router.add_post("/dashboard/{token}/kirim", tandai_kirim)
     app.router.add_get("/dashboard/{token}/struk/{inv}", struk)

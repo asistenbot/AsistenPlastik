@@ -329,6 +329,7 @@ Command di bawah ini cadangan aja kalau mau lebih pasti/cepat:
 /dokumen <no invoice atau nama customer> — cetak ulang invoice + surat jalan
 (kalau customer punya banyak invoice, bot kasih daftar buat dipilih)
 /lunas <no invoice atau nama customer> — tandai order sudah dibayar
+/customer [nama] — tambah customer baru / isi HP & alamat (boleh nyusul)
 /supplier <barang/kategori> ke <supplier> — isi supplier di PriceList (buat PO otomatis)
 /cektransfer <nominal> [customer] — cari bon mana yang cocok sama transfer masuk
 /komisi — komisi jalur belakang per customer (rahasia, chat pribadi)
@@ -995,6 +996,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.effective_message.text or ""
     awaiting = context.user_data.get("awaiting")
 
+    if awaiting in ("cust_nama", "cust_hp", "cust_alamat"):
+        await _customer_langkah(update, context, awaiting, text)
+        return
     if awaiting == "po_text":
         context.user_data["awaiting"] = None
         await _process_po_text(update, context, text)
@@ -3043,6 +3047,57 @@ async def _kabar_komisi(bot, inv):
             logger.exception("gagal kirim pengingat komisi ke %s", chat_id)
 
 
+_NYUSUL = {"-", "nyusul", "menyusul", "skip", "lewat", "belum", "belum ada", "nanti", "kosong", "tba"}
+
+
+@owner_only
+async def customer_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/customer [nama] -> tambah customer baru / isi HP & alamat, ditanya satu-satu."""
+    nama = " ".join(context.args or []).strip()
+    context.user_data["cust_baru"] = {}
+    if nama:
+        await _customer_langkah(update, context, "cust_nama", nama)
+        return
+    context.user_data["awaiting"] = "cust_nama"
+    await update.effective_message.reply_text("👤 Nama customer-nya siapa?\n(/batal buat gak jadi)")
+
+
+async def _customer_langkah(update, context, langkah, text):
+    import asyncio
+    t = " ".join((text or "").split())
+    d = context.user_data.setdefault("cust_baru", {})
+    sheets = _sheets()
+    if langkah == "cust_nama":
+        if not t:
+            await update.effective_message.reply_text("Ketik nama customer-nya ya.")
+            return
+        lama = await asyncio.to_thread(sheets.get_customer, t)
+        d["nama"] = str(lama.get("Nama", t)).strip() if lama else t
+        info = ""
+        if lama:
+            info = (f"Customer lama ✅\nHP sekarang: {lama.get('No_HP') or '-'}\n"
+                    f"Alamat sekarang: {lama.get('Alamat') or '-'}\n\n")
+        context.user_data["awaiting"] = "cust_hp"
+        await update.effective_message.reply_text(
+            f"{info}📱 No HP {d['nama']}?\n(ketik - kalau nyusul / gak diganti)")
+        return
+    if langkah == "cust_hp":
+        d["hp"] = "" if t.lower() in _NYUSUL else t
+        context.user_data["awaiting"] = "cust_alamat"
+        await update.effective_message.reply_text(f"📍 Alamat {d.get('nama', '')}?\n(ketik - kalau nyusul / gak diganti)")
+        return
+    d["alamat"] = "" if t.lower() in _NYUSUL else t
+    context.user_data["awaiting"] = None
+    context.user_data.pop("cust_baru", None)
+    baru, n = await asyncio.to_thread(sheets.simpan_customer, d.get("nama", ""), d.get("hp", ""), d.get("alamat", ""))
+    cust = await asyncio.to_thread(sheets.get_customer, d.get("nama", "")) or {}
+    await update.effective_message.reply_text(
+        ("✅ Customer baru disimpan!" if baru else "✅ Data customer diupdate!")
+        + f"\n\n👤 {cust.get('Nama', d.get('nama'))}\n📱 {cust.get('No_HP') or '(nyusul)'}\n📍 {cust.get('Alamat') or '(nyusul)'}"
+        + (f"\n\n{n} invoice yang belum lunas ikut keupdate — cetak ulang surat jalannya biar alamatnya keluar." if n else "")
+        + "\n\nKalau nanti alamat/HP udah dapet: ketik /customer " + str(cust.get('Nama', d.get('nama'))))
+
+
 @owner_only
 async def supplier_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/supplier <kategori / nama barang> ke <nama supplier> -> isi kolom Supplier PriceList."""
@@ -3638,6 +3693,7 @@ def main():
     app.add_handler(CommandHandler("cekharga", cekharga_cmd))
     app.add_handler(CommandHandler("komisi", komisi_cmd))
     app.add_handler(CommandHandler("supplier", supplier_cmd))
+    app.add_handler(CommandHandler("customer", customer_cmd))
     app.add_handler(CommandHandler("bersihindobel", bersihindobel_cmd))
     app.add_handler(CommandHandler("cektransfer", cektransfer_cmd))
     app.add_handler(CommandHandler("importgrandia", importgrandia_cmd))

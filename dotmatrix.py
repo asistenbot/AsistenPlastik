@@ -394,11 +394,138 @@ def _vector_pdf(pages):
     buf.seek(0)
     return buf
 
+# ---------------------------------------------------------- PDF titik (bitmap)
+# Halaman digambar titik-per-titik PAS di grid printer dot matrix 120 x 72 dpi
+# (resolusi standar LX-310, irit tinta). Hurufnya font titik klasik 6x13
+# (kayak font bawaan printer), jadi semua huruf/angka tingginya sama persis --
+# gak ada lagi "gede-kecil" kayak kalau driver Windows ngecilin font vektor.
+DOT_X, DOT_Y = 120, 72          # titik per inch (horizontal, vertikal)
+CELL_X, CELL_Y = 11, 12         # 1 kolom = 11 titik (80 kolom = 7,33 inch), 1 baris = 12 titik (6 lpi)
+BX0, BY0 = 24, 26               # margin kiri/atas (titik)
+_BFONT = {}
+_GLYPH = {}
+
+
+def _bfont(bold):
+    if bold not in _BFONT:
+        _BFONT[bold] = ImageFont.load(os.path.join(BASE_DIR, "fonts", "bitmap",
+                                                   "fixed6x13b.pil" if bold else "fixed6x13.pil"))
+    return _BFONT[bold]
+
+
+def _ascii_ch(ch):
+    if ord(ch) < 128:
+        return ch
+    import unicodedata
+    a = unicodedata.normalize("NFKD", ch).encode("ascii", "ignore").decode()
+    return {"×": "x", "–": "-", "—": "-", "‘": "'", "’": "'", "“": '"', "”": '"', "•": "*"}.get(ch, a[:1] or "?")
+
+
+# glyph yang digambar ulang biar jelas di dot matrix: titik = kotak (bukan "+"), 0 bulat polos
+_OVR = {
+    ".": ["......"] * 9 + [".##...", ".##...", "......", "......"],
+    ",": ["......"] * 9 + [".##...", ".##...", "..#...", ".#...."],
+    ":": ["......"] * 4 + [".##...", ".##...", "......", "......", "......", ".##...", ".##...", "......", "......"],
+    ";": ["......"] * 4 + [".##...", ".##...", "......", "......", "......", ".##...", ".##...", "..#...", ".#...."],
+    "0": ["......", "......", ".###..", "#...#.", "#...#.", "#...#.", "#...#.", "#...#.", "#...#.", "#...#.",
+          ".###..", "......", "......"],
+}
+
+
+def _glyph(ch, bold, big=False):
+    """Bitmap 1 karakter: font 6x13 -> 5 kolom pertama digandain + 1 kolom spasi = 11 titik.
+    bold = dicetak dobel geser 1 titik (kayak mode 'emphasized' printer).
+    big=True: 2x lebar & 2x tinggi (judul)."""
+    key = (ch, bold, big)
+    if key in _GLYPH:
+        return _GLYPH[key]
+    a = _ascii_ch(ch)
+    if a in _OVR:
+        rows_ = _OVR[a]
+        hit = lambda x, y: rows_[y][x] == "#"
+    else:
+        g = Image.new("1", (6, 13), 1)
+        ImageDraw.Draw(g).text((0, 0), a, font=_bfont(False), fill=0)
+        sp = g.load()
+        hit = lambda x, y: sp[x, y] == 0
+    cols = [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5]          # 6 kolom -> 11 titik
+    rows = list(range(13))
+    if big:
+        cols = [c for c in cols for _ in (0, 1)]
+        rows = [r for r in rows for _ in (0, 1)]
+    w, h = len(cols), len(rows)
+    out = Image.new("1", (w, h), 1)
+    dp = out.load()
+    for yy, r in enumerate(rows):
+        for xx, cc in enumerate(cols):
+            if hit(cc, r):
+                dp[xx, yy] = 0
+    if bold:
+        lim = w - (2 if big else 1)                    # kolom spasi kanan tetap kosong
+        for yy in range(h):
+            for xx in range(lim - 1, 0, -1):
+                if dp[xx - 1, yy] == 0:
+                    dp[xx, yy] = 0
+    _GLYPH[key] = out
+    return out
+
+
+def _bitmap_page(lines, title):
+    W, H = int(8.5 * DOT_X), int(5.5 * DOT_Y)
+    im = Image.new("1", (W, H), 1)
+    dr = ImageDraw.Draw(im)
+    for li, s_ in enumerate(lines):
+        ytop = BY0 + li * CELL_Y
+        ymid = ytop + 6
+        for ci, ch in enumerate(s_):
+            x = BX0 + ci * CELL_X
+            if ch == " ":
+                continue
+            if ch == "─":
+                dr.line([(x, ymid), (x + CELL_X - 1, ymid)], fill=0)
+                continue
+            if ch == "═":
+                dr.line([(x, ymid - 1), (x + CELL_X - 1, ymid - 1)], fill=0)
+                dr.line([(x, ymid + 1), (x + CELL_X - 1, ymid + 1)], fill=0)
+                continue
+            g = _glyph(ch, li == 0)
+            im.paste(0, (x, ytop - 1), ImageOps_invert(g))
+    if title:
+        tx = BX0 + (COLS - 8) * CELL_X - len(title) * 2 * CELL_X
+        for i, ch in enumerate(title):
+            g = _glyph(ch, True, big=True)
+            im.paste(0, (tx + i * 2 * CELL_X, BY0 + 2), ImageOps_invert(g))
+    return im
+
+
+def ImageOps_invert(g):
+    """mask buat paste: titik hitam (0) di glyph -> 255 di mask."""
+    from PIL import ImageOps
+    return ImageOps.invert(g.convert("L"))
+
+
+def _bitmap_pdf(pages):
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.utils import ImageReader
+    W, H = 8.5 * 72, 5.5 * 72
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=(W, H))
+    for lines, _, title in pages:
+        im = _bitmap_page(lines, title)
+        b = io.BytesIO()
+        im.save(b, "PNG")
+        b.seek(0)
+        c.drawImage(ImageReader(b), 0, 0, width=W, height=H)
+        c.showPage()
+    c.save()
+    buf.seek(0)
+    return buf
+
 
 def _finish(pages):
     pngs = [_render(png_lines, title) for png_lines, _, title in pages]
     txt = "\r\n\f".join("\r\n".join(l.rstrip() for l in txt_lines) for _, txt_lines, _ in pages) + "\r\n"
-    pdf = _vector_pdf(pages)
+    pdf = _vector_pdf(pages) if os.environ.get("DM_PDF", "titik") == "vektor" else _bitmap_pdf(pages)
     return pngs, io.BytesIO(txt.encode("utf-8")), pdf
 
 

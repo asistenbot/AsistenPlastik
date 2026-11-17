@@ -870,40 +870,36 @@ class SheetsClient:
         return sorted(orders, key=lambda r: str(r.get("Timestamp", "")))[-1].get("No_Invoice")
 
     def mark_order_lunas(self, no_invoice):
-        """Tandai semua baris dengan No_Invoice ini jadi Lunas. Balikin total
-        (subtotal + ongkir) buat dicatat ke Kas."""
+        """Tandai baris No_Invoice ini yang masih Pending jadi Lunas. Balikin total
+        (subtotal + ongkir) buat dicatat ke Kas, atau None kalau invoice-nya gak
+        ketemu / gak ada baris Pending (udah Lunas atau Batal) -- biar Kas Masuk
+        gak kecatet dobel dan order Batal gak kehidupin lagi."""
+        from gspread.utils import rowcol_to_a1
         ws = self._ws(config.SHEET_ORDERS)
-        headers = ws.row_values(1)
-        col_invoice = headers.index("No_Invoice") + 1
-        col_status = headers.index("Status") + 1
-        col_tgl = headers.index("Tanggal_Bayar") + 1
-        col_subtotal = headers.index("Subtotal") + 1
-        col_ongkir = headers.index("Ongkir") + 1
-
         all_values = ws.get_all_values()
-        total = 0.0
-        found = False
-        updates = []
-        for idx, row in enumerate(all_values[1:], start=2):
-            if len(row) < col_invoice:
-                continue
-            if row[col_invoice - 1] != no_invoice:
-                continue
-            found = True
-            try:
-                total += float(row[col_subtotal - 1] or 0)
-            except ValueError:
-                pass
-            try:
-                total += float(row[col_ongkir - 1] or 0)
-            except ValueError:
-                pass
-            updates.append((idx, col_status, "Lunas"))
-            updates.append((idx, col_tgl, _today_str()))
-        if not found:
+        if not all_values:
             return None
-        for r, c, v in updates:
-            ws.update_cell(r, c, v)
+        headers = all_values[0]
+        c_inv, c_st, c_tgl = headers.index("No_Invoice"), headers.index("Status"), headers.index("Tanggal_Bayar")
+        c_sub, c_ong = headers.index("Subtotal"), headers.index("Ongkir")
+        total = 0.0
+        data = []
+        hari_ini = _today_str()
+        for idx, row in enumerate(all_values[1:], start=2):
+            if len(row) <= c_inv or row[c_inv] != no_invoice:
+                continue
+            if (row[c_st] if len(row) > c_st else "") != "Pending":
+                continue
+            for c in (c_sub, c_ong):
+                try:
+                    total += float(row[c] or 0) if len(row) > c else 0
+                except ValueError:
+                    pass
+            data.append({"range": rowcol_to_a1(idx, c_st + 1), "values": [["Lunas"]]})
+            data.append({"range": rowcol_to_a1(idx, c_tgl + 1), "values": [[hari_ini]]})
+        if not data:
+            return None
+        ws.batch_update(data)
         self._safe_close_reminders(no_invoice, "Selesai")
         try:
             self.catat_komisi(no_invoice)
@@ -914,7 +910,8 @@ class SheetsClient:
     def unmark_order_lunas(self, no_invoice):
         """Balikin invoice yang kesalahan ditandai Lunas jadi Pending: kosongin
         Tanggal_Bayar, hapus catatan Kas Masuk 'Pelunasan <inv>', dan pasang
-        lagi pengingat cek pembayaran. Balikin total, atau None kalau gak ketemu."""
+        lagi pengingat cek pembayaran. Balikin total, atau None kalau gak ketemu
+        / invoice-nya bukan Lunas (Pending & Batal gak diubah)."""
         ws = self._ws(config.SHEET_ORDERS)
         values = ws.get_all_values()
         if not values:
@@ -927,6 +924,8 @@ class SheetsClient:
         for i, row in enumerate(values[1:], start=2):
             if len(row) <= c_inv or row[c_inv] != no_invoice:
                 continue
+            if (row[c_st] if len(row) > c_st else "") != "Lunas":
+                continue  # cuma yang Lunas yang dibalikin; Pending/Batal jangan disentuh
             found = True
             nama = row[c_nama] if len(row) > c_nama else nama
             for c in (c_sub, c_ong):
@@ -1117,6 +1116,8 @@ class SheetsClient:
         for idx, row in enumerate(all_values[1:], start=2):
             if len(row) < col_invoice or row[col_invoice - 1] != no_invoice:
                 continue
+            if len(row) >= col_status and row[col_status - 1] == "Lunas":
+                continue  # udah Lunas (Kas Masuk udah kecatet): harus /batallunas dulu
             found = True
             ws.update_cell(idx, col_status, "Batal")
         if found:
@@ -1369,8 +1370,8 @@ class SheetsClient:
         for idx, row in enumerate(all_values[1:], start=2):
             if len(row) < col_po or row[col_po - 1] != no_po:
                 continue
-            if row[col_status - 1] == "Batal":
-                continue  # udah dibatalin sebelumnya, jangan dobel reverse utang
+            if row[col_status - 1] in ("Batal", "Lunas"):
+                continue  # udah batal / udah dibayar: jangan dobel ngurangin utang
             found = True
             nama_supplier = row[col_supplier - 1]
             try:

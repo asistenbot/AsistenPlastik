@@ -536,13 +536,28 @@ async def _do_lunas(update, key):
         await update.effective_message.reply_text("Invoice/customer mana yang mau ditandai lunas?")
         return
     sheets = _sheets()
-    no_invoice = key if key.upper().startswith(config.INVOICE_PREFIX) else sheets.get_latest_invoice_for_customer(key)
+    if key.upper().startswith(config.INVOICE_PREFIX):
+        no_invoice = key
+    else:
+        # nama customer: ambil invoice Pending paling baru (bukan yang udah Lunas/Batal)
+        pend = sheets.get_orders_by_customer(key, status="Pending")
+        no_invoice = (sorted(pend, key=lambda r: str(r.get("Timestamp", "")))[-1].get("No_Invoice")
+                      if pend else sheets.get_latest_invoice_for_customer(key))
     if not no_invoice:
         await update.effective_message.reply_text(f"Gak ketemu order buat '{key}'.")
         return
+    rows = sheets.get_order_items(no_invoice)
+    if not rows:
+        await update.effective_message.reply_text(f"Invoice {no_invoice} gak ketemu.")
+        return
+    status = str(rows[0].get("Status", ""))
+    if status != "Pending":
+        await update.effective_message.reply_text(
+            f"{no_invoice} statusnya udah {status or '-'}, gak diubah (biar Kas Masuk gak kecatet dobel).")
+        return
     total = sheets.mark_order_lunas(no_invoice)
     if total is None:
-        await update.effective_message.reply_text(f"Invoice {no_invoice} gak ketemu.")
+        await update.effective_message.reply_text(f"Invoice {no_invoice} gak ketemu / udah gak Pending.")
         return
     sheets.add_kas_entry("Masuk", "Penjualan", total, keterangan=f"Pelunasan {no_invoice} (via /lunas Telegram)", ref=no_invoice)
     await update.effective_message.reply_text(
@@ -629,7 +644,8 @@ async def batallunas_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     total = _sheets().unmark_order_lunas(key.upper())
     if total is None:
-        await update.effective_message.reply_text(f"Invoice {key} gak ketemu.")
+        await update.effective_message.reply_text(
+            f"Invoice {key} gak ketemu, atau statusnya bukan Lunas (gak ada yang perlu dibalikin).")
         return
     await update.effective_message.reply_text(
         f"↩️ {key.upper()} dibalikin ke Pending ({rupiah(total)}), catatan Kas Masuk-nya dihapus. "
@@ -1571,6 +1587,11 @@ async def _do_cancel_order(update, context, target):
     if str(rows[0].get("Status", "")) == "Batal":
         await update.effective_message.reply_text(f"{no_invoice} udah dibatalin sebelumnya.")
         return
+    if str(rows[0].get("Status", "")) == "Lunas":
+        await update.effective_message.reply_text(
+            f"{no_invoice} udah Lunas (uangnya udah kecatet di Kas Masuk). Kalau beneran mau dibatalin, "
+            f"balikin dulu: /batallunas {no_invoice} -- baru batalin.")
+        return
 
     total = 0.0
     for r in rows:
@@ -1621,6 +1642,11 @@ async def _do_cancel_po(update, context, target):
         return
     if str(rows[0].get("Status", "")) == "Batal":
         await update.effective_message.reply_text(f"{no_po} udah dibatalin sebelumnya.")
+        return
+    if str(rows[0].get("Status", "")) == "Lunas":
+        await update.effective_message.reply_text(
+            f"{no_po} udah Lunas (pembayarannya udah kecatet di Kas Keluar & utang), jadi gak bisa dibatalin "
+            "dari sini -- kalau dibatalin, utang supplier-nya kepotong dua kali.")
         return
 
     total = 0.0
@@ -2332,7 +2358,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sheets = _sheets()
         ok = sheets.cancel_order(no_invoice)
         if not ok:
-            await query.edit_message_text(f"Invoice {no_invoice} gak ketemu lagi.")
+            await query.edit_message_text(f"Invoice {no_invoice} gak ketemu lagi / udah Lunas, gak dibatalin.")
             return
         await query.edit_message_text(f"✅ {no_invoice} udah ditandai *Batal*.", parse_mode=ParseMode.MARKDOWN)
         return
@@ -2350,7 +2376,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sheets = _sheets()
         ok, nama_supplier, total = sheets.cancel_po(no_po)
         if not ok:
-            await query.edit_message_text(f"PO {no_po} gak ketemu lagi.")
+            await query.edit_message_text(f"PO {no_po} gak ketemu lagi / udah Lunas, gak dibatalin.")
             return
         await query.edit_message_text(
             f"✅ {no_po} udah ditandai *Batal*. Utang ke *{nama_supplier}* otomatis "

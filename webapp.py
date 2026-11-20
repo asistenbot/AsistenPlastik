@@ -148,7 +148,10 @@ def make_web_app(sheets_getter, on_order, on_staff_event=None):
         data = json.dumps({"items": items}).replace("</", "<\\/")
         page = (PAGE.replace("__DATA__", data)
                     .replace("__NOTE__", ('<div class="note">ℹ️ ' + html.escape(_catatan(link)) + '</div>') if _catatan(link) else "")
-                    .replace("__NAMA__", html.escape(str(link.get("Nama_Customer", ""))))
+                    .replace("__NAMA__", html.escape(str(link.get("Nama_Customer", "")))
+                             + ((" — " + html.escape(str(link.get("Cabang")))) if str(link.get("Cabang", "") or "").strip() else "")
+                             + (('<br><small>📍 Dikirim ke: ' + html.escape(str(link.get("Alamat"))) + '</small>')
+                                if str(link.get("Alamat", "") or "").strip() else ""))
                     .replace("__BIZ__", html.escape(config.BUSINESS_NAME)))
         return web.Response(text=page, content_type="text/html", charset="utf-8")
 
@@ -184,9 +187,13 @@ def make_web_app(sheets_getter, on_order, on_staff_event=None):
                 return web.json_response({"ok": False, "error": "Barang tidak valid"}, status=400)
             nama = str(link.get("Nama_Customer", ""))
             cust = await asyncio.to_thread(sheets.get_customer, nama) or {}
+            cabang = str(link.get("Cabang", "") or "").strip()
+            alamat = str(link.get("Alamat", "") or "").strip() or str(cust.get("Alamat", "") or "")
+            if cabang:
+                alamat = f"Cabang {cabang} - {alamat}" if alamat else f"Cabang {cabang}"
             parsed = {
                 "nama_customer": nama, "no_hp": str(cust.get("No_HP", "") or ""),
-                "alamat": str(cust.get("Alamat", "") or ""), "metode": "Kirim", "items": items, "ongkir": 0,
+                "alamat": alamat, "metode": "Kirim", "items": items, "ongkir": 0, "cabang": cabang,
                 "no_po_customer": str(body.get("no_po", ""))[:60],
                 "tanggal_kirim": str(body.get("tanggal_kirim", ""))[:10],
                 "catatan": str(body.get("catatan", ""))[:300], "_web": True,
@@ -201,7 +208,7 @@ def make_web_app(sheets_getter, on_order, on_staff_event=None):
             if config.ADMIN_WA:
                 from urllib.parse import quote
                 wa = "https://wa.me/" + config.ADMIN_WA + "?text=" + quote(
-                    f"Halo, saya dari {nama}. Order online {pid} sudah dikirim, mohon dikonfirmasi. Terima kasih.")
+                    f"Halo, saya dari {nama}{(' cabang ' + cabang) if cabang else ''}. Order online {pid} sudah dikirim, mohon dikonfirmasi. Terima kasih.")
             return web.json_response({"ok": True, "id": pid, "total": total, "wa": wa})
         except Exception:
             logger.exception("gagal proses order web")

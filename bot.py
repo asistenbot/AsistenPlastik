@@ -3516,9 +3516,15 @@ async def importgrandia_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @owner_only
 async def linkorder_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    nama = " ".join(context.args).strip() if context.args else ""
+    raw = " ".join(context.args).strip() if context.args else ""
+    bagian = [b.strip() for b in raw.split("|")]
+    nama = bagian[0] if bagian else ""
+    cabang = bagian[1] if len(bagian) > 1 else ""
+    alamat_cabang = bagian[2] if len(bagian) > 2 else ""
     if not nama:
-        await update.effective_message.reply_text("Format: /linkorder Grandia")
+        await update.effective_message.reply_text(
+            "Format: /linkorder Grandia\n"
+            "Per cabang: /linkorder Shu Guo Yin Xiang | Juanda | Jl. Ir. H. Juanda No.177")
         return
     sheets = _sheets()
     cust = sheets.get_customer(nama)
@@ -3534,14 +3540,15 @@ async def linkorder_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.effective_message.reply_text("Ada beberapa yang mirip: " + ", ".join(cands) + ". Tulis nama lengkapnya.")
             return
-    token = sheets.get_or_create_link(nama)
+    token = sheets.get_or_create_link(nama, cabang, alamat_cabang)
     if not config.PUBLIC_BASE_URL:
         await update.effective_message.reply_text(
             "Link-nya udah dibikin, tapi alamat publik bot belum aktif. Nyalain Public Domain di Railway "
             "(Settings → Networking → Generate Domain), lalu ketik /linkorder lagi.")
         return
     await update.effective_message.reply_text(
-        f"🔗 Link order {nama}:\n{config.PUBLIC_BASE_URL}/order/{token}\n\n"
+        f"🔗 Link order {nama}{(' — cabang ' + cabang) if cabang else ''}:\n{config.PUBLIC_BASE_URL}/order/{token}\n"
+        + (f"📍 Dikirim ke: {alamat_cabang}\n" if alamat_cabang else "") + "\n"
         "Kirim link ini ke dia. Order yang masuk muncul di Telegram buat lu konfirmasi.")
 
 

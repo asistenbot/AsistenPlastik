@@ -71,7 +71,7 @@ SCHEMA = {
     config.SHEET_PENERIMAAN: ["No_PO", "Status", "Batch", "Staff", "Waktu", "Catatan", "Peta"],
     config.SHEET_PERMINTAAN: ["ID", "Waktu", "Staff", "Item_Code", "Nama", "Qty", "Satuan", "Catatan", "Status"],
     config.SHEET_PENGIRIMAN: ["No_Invoice", "Status", "Staff", "Waktu", "Tagih_Tgl", "Tagih_Lagi"],
-    config.SHEET_LINKORDER: ["Token", "Nama_Customer", "Aktif", "Dibuat", "Catatan"],
+    config.SHEET_LINKORDER: ["Token", "Nama_Customer", "Aktif", "Dibuat", "Catatan", "Cabang", "Alamat"],
     config.SHEET_PESANANWEB: ["ID", "Waktu", "Nama", "Payload", "Status"],
     config.SHEET_TAGIHAN: [
         "Nama", "Tipe", "Hari_Kontra_Bon", "Tempo_Hari", "Alias",
@@ -2728,14 +2728,35 @@ class SheetsClient:
                 return r
         return None
 
-    def get_or_create_link(self, nama):
-        for r in self._records(self._ws(config.SHEET_LINKORDER)):
-            if str(r.get("Nama_Customer", "")).strip().lower() == nama.strip().lower() \
-                    and str(r.get("Aktif", "")).strip().upper() != "TIDAK":
-                return str(r["Token"])
+    def get_or_create_link(self, nama, cabang="", alamat=""):
+        """1 link per customer, atau per cabang (tiap cabang punya alamat kirim sendiri)."""
+        cabang = " ".join(str(cabang or "").split())
+        alamat = " ".join(str(alamat or "").split())
+        ws = self._ws(config.SHEET_LINKORDER)
+        vals = ws.get_all_values()
+        h = vals[0] if vals else []
+        for kol in ("Catatan", "Cabang", "Alamat"):
+            if h and kol not in h:
+                h.append(kol)
+                ws.update_cell(1, len(h), kol)
+        ci, ca = h.index("Cabang"), h.index("Alamat")
+        for i, row in enumerate(vals[1:], start=2):
+            row = row + [""] * (len(h) - len(row))
+            if row[1].strip().lower() == nama.strip().lower() and row[2].strip().upper() != "TIDAK" \
+                    and row[ci].strip().lower() == cabang.lower():
+                if alamat and row[ca].strip() != alamat:
+                    ws.update_cell(i, ca + 1, alamat)
+                return str(row[0])
         token = uuid.uuid4().hex[:14]
-        self._ws(config.SHEET_LINKORDER).append_row([token, nama, "YA", _now_str()], value_input_option="RAW")
+        baru = [token, nama, "YA", _now_str()] + [""] * (len(h) - 4)
+        baru[ci], baru[ca] = cabang, alamat
+        ws.append_row(baru, value_input_option="RAW")
         return token
+
+    def get_links(self):
+        return [r for r in self._records(self._ws(config.SHEET_LINKORDER))
+                if not str(r.get("Nama_Customer", "")).startswith("@")
+                and str(r.get("Aktif", "")).strip().upper() != "TIDAK"]
 
     def add_pesanan_web(self, pid, nama, payload_json):
         self._ws(config.SHEET_PESANANWEB).append_row(

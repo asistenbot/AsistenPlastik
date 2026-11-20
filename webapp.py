@@ -35,6 +35,7 @@ input[type=date],input[type=text],textarea{width:100%;padding:10px;border:1px so
 .bar button:disabled{opacity:.5}.note{background:#fff7d6;border:1px solid #ecd47a;color:#5b4a00;margin:12px;padding:10px 14px;border-radius:10px;font-weight:600;max-width:696px}
 @media(min-width:744px){.note{margin:12px auto}}
 .ok{text-align:center;padding:40px 16px}.ok h2{font-size:22px;color:var(--g);text-transform:none}
+.tj{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--ln);border-radius:10px;padding:10px 12px;margin:6px 0;color:var(--ink);font-size:15px;cursor:pointer}.tj input{margin-top:3px;width:18px;height:18px;accent-color:var(--g)}.tj small{color:var(--mu)}
 .wa{display:inline-block;margin-top:14px;background:#25d366;color:#fff;text-decoration:none;padding:14px 22px;border-radius:10px;font-weight:600}
 </style></head><body>
 <header><h1>Order ke __BIZ__</h1><p>Halo, <b>__NAMA__</b> — pilih barang & jumlahnya, lalu kirim.</p></header>
@@ -47,7 +48,7 @@ const m=document.getElementById('m');
 const cats={};D.items.forEach(i=>{(cats[i.kategori||'Lainnya']=cats[i.kategori||'Lainnya']||[]).push(i)});
 let h='';Object.keys(cats).forEach(c=>{h+='<h2>'+esc(c)+'</h2><div class="card">';cats[c].forEach(i=>{
 h+='<div class="it"><div class="n"><b>'+esc(i.nama)+'</b><span>'+rp(i.harga)+' / '+esc(i.satuan)+'</span></div><div class="q"><button data-c="'+esc(i.code)+'" data-d="-1">−</button><input inputmode="decimal" id="q_'+esc(i.code)+'" value="0" data-c="'+esc(i.code)+'"><button data-c="'+esc(i.code)+'" data-d="1">+</button></div></div>'});h+='</div>'});
-h+='<h2>Pengiriman</h2><div class="card" style="padding:12px"><label style="margin-top:0">Tanggal kirim</label><input type="date" id="tgl"><label>No. PO Anda (kalau ada)</label><input type="text" id="po"><label>Catatan</label><textarea id="cat" rows="2"></textarea></div>';
+h+='<h2>Pengiriman</h2><div class="card" style="padding:12px">'+((D.tujuan||[]).length>1?'<label style="margin-top:0">Kirim ke</label>'+D.tujuan.map((t,i)=>'<label class="tj"><input type="radio" name="tj" value="'+i+'"'+(i==0?' checked':'')+'><span><b>'+esc(t.nama)+'</b>'+(t.alamat?'<br><small>📍 '+esc(t.alamat)+'</small>':'')+'</span></label>').join(''):'')+'<label'+((D.tujuan||[]).length>1?'':' style="margin-top:0"')+'>Tanggal kirim</label><input type="date" id="tgl"><label>No. PO Anda (kalau ada)</label><input type="text" id="po"><label>Catatan</label><textarea id="cat" rows="2"></textarea></div>';
 m.innerHTML=h;
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 const P={};D.items.forEach(i=>P[i.code]=i);
@@ -58,12 +59,23 @@ qty[c]=Math.max(0,(qty[c]||0)+d);document.getElementById('q_'+c).value=qty[c];up
 m.addEventListener('input',e=>{const c=e.target.dataset.c;if(!c)return;let v=parseFloat(String(e.target.value).replace(',','.'));qty[c]=isFinite(v)&&v>0?v:0;upd()});
 document.getElementById('go').onclick=async()=>{const b=document.getElementById('go');b.disabled=true;b.textContent='Mengirim...';
 const items=Object.keys(qty).filter(c=>qty[c]>0).map(c=>({code:c,qty:qty[c]}));
-try{const r=await fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items,tanggal_kirim:document.getElementById('tgl').value,no_po:document.getElementById('po').value,catatan:document.getElementById('cat').value})});
+try{const r=await fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items,tujuan:+((document.querySelector('input[name=tj]:checked')||{}).value||0),tanggal_kirim:document.getElementById('tgl').value,no_po:document.getElementById('po').value,catatan:document.getElementById('cat').value})});
 const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.error||'Gagal');
 document.getElementById('bar').remove();
 m.innerHTML='<div class="ok"><h2>✅ Order terkirim</h2><p>Nomor order: <b>'+esc(j.id)+'</b><br>Total '+rp(j.total)+'</p><p>Silakan konfirmasi lewat WhatsApp supaya cepat diproses.</p>'+(j.wa?'<a class="wa" href="'+esc(j.wa)+'">Konfirmasi via WhatsApp</a>':'')+'</div>';
 window.scrollTo(0,0)}catch(err){alert('Order gagal terkirim: '+err.message+'. Coba lagi ya.');b.disabled=false;b.textContent='Kirim Order'}};
 </script></body></html>"""
+
+
+def _daftar_tujuan(sheets, link):
+    """Kolom Tujuan di LinkOrder (mis. 'SHU GUO YIN XIANG; Hanam') -> customer bisa pilih kirim ke mana.
+    Invoice dibuat atas nama tujuan yang dipilih (pakai alamat & HP customer itu)."""
+    names = [n.strip() for n in str(link.get("Tujuan", "") or "").replace(",", ";").split(";") if n.strip()]
+    out = []
+    for n in names:
+        c = sheets.get_customer(n) or {}
+        out.append({"nama": str(c.get("Nama", "") or n).strip(), "alamat": str(c.get("Alamat", "") or "").strip()})
+    return out
 
 
 def _item_label(row):
@@ -145,7 +157,8 @@ def make_web_app(sheets_getter, on_order, on_staff_event=None):
                 continue
             items.append({"code": code, "nama": _item_label(r), "kategori": r.get("Kategori", ""),
                           "satuan": r.get("Satuan", ""), "harga": harga})
-        data = json.dumps({"items": items}).replace("</", "<\\/")
+        tujuan = await asyncio.to_thread(_daftar_tujuan, sheets, link)
+        data = json.dumps({"items": items, "tujuan": tujuan}).replace("</", "<\\/")
         page = (PAGE.replace("__DATA__", data)
                     .replace("__NOTE__", ('<div class="note">ℹ️ ' + html.escape(_catatan(link)) + '</div>') if _catatan(link) else "")
                     .replace("__NAMA__", html.escape(str(link.get("Nama_Customer", "")))
@@ -186,9 +199,16 @@ def make_web_app(sheets_getter, on_order, on_staff_event=None):
             if not items:
                 return web.json_response({"ok": False, "error": "Barang tidak valid"}, status=400)
             nama = str(link.get("Nama_Customer", ""))
+            tujuan = await asyncio.to_thread(_daftar_tujuan, sheets, link)
+            if len(tujuan) > 1:
+                try:
+                    pilih = tujuan[int(body.get("tujuan") or 0)]
+                except (ValueError, IndexError, TypeError):
+                    pilih = tujuan[0]
+                nama = pilih["nama"]
             cust = await asyncio.to_thread(sheets.get_customer, nama) or {}
-            cabang = str(link.get("Cabang", "") or "").strip()
-            alamat = str(link.get("Alamat", "") or "").strip() or str(cust.get("Alamat", "") or "")
+            cabang = str(link.get("Cabang", "") or "").strip() if len(tujuan) <= 1 else ""
+            alamat = (str(link.get("Alamat", "") or "").strip() if len(tujuan) <= 1 else "") or str(cust.get("Alamat", "") or "")
             if cabang:
                 alamat = f"Cabang {cabang} - {alamat}" if alamat else f"Cabang {cabang}"
             parsed = {

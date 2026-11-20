@@ -71,7 +71,7 @@ SCHEMA = {
     config.SHEET_PENERIMAAN: ["No_PO", "Status", "Batch", "Staff", "Waktu", "Catatan", "Peta"],
     config.SHEET_PERMINTAAN: ["ID", "Waktu", "Staff", "Item_Code", "Nama", "Qty", "Satuan", "Catatan", "Status"],
     config.SHEET_PENGIRIMAN: ["No_Invoice", "Status", "Staff", "Waktu", "Tagih_Tgl", "Tagih_Lagi"],
-    config.SHEET_LINKORDER: ["Token", "Nama_Customer", "Aktif", "Dibuat", "Catatan", "Cabang", "Alamat"],
+    config.SHEET_LINKORDER: ["Token", "Nama_Customer", "Aktif", "Dibuat", "Catatan", "Cabang", "Alamat", "Tujuan"],
     config.SHEET_PESANANWEB: ["ID", "Waktu", "Nama", "Payload", "Status"],
     config.SHEET_TAGIHAN: [
         "Nama", "Tipe", "Hari_Kontra_Bon", "Tempo_Hari", "Alias",

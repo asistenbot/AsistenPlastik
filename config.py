@@ -122,6 +122,8 @@ KONTRABON_TEMPO_HARI = 14
 # Tagihan otomatis: X hari setelah invoice ditandai 'Sudah dikirim' & belum lunas -> bot kirim PDF Surat Tagihan
 TAGIH_SETELAH_KIRIM_HARI = 14
 TAGIH_ULANG_HARI = 7
+# web order: pilihan per Bal (kalau kolom Isi_Bal di PriceList kosong)
+ISI_BAL_KATEGORI = {"SAMPAH": 25}
 # pengingat yang DIKIRIM ke Telegram. Sisanya tetap dicatat (keliatan di dashboard: jatuh tempo / lewat tempo)
 # tapi gak dikirim. Isi lengkapnya: {"kontra_bon", "bayar_customer", "bayar_supplier"}
 PENGINGAT_DIKIRIM = {"kontra_bon"}  # setelah kontra bon, cek pembayaran selalu 14 hari lagi (semua customer)

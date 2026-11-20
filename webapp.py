@@ -36,6 +36,7 @@ input[type=date],input[type=text],textarea{width:100%;padding:10px;border:1px so
 @media(min-width:744px){.note{margin:12px auto}}
 .ok{text-align:center;padding:40px 16px}.ok h2{font-size:22px;color:var(--g);text-transform:none}
 .tj{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--ln);border-radius:10px;padding:10px 12px;margin:6px 0;color:var(--ink);font-size:15px;cursor:pointer}.tj input{margin-top:3px;width:18px;height:18px;accent-color:var(--g)}.tj small{color:var(--mu)}
+.un{display:inline-flex;margin-top:6px;border:1px solid var(--g);border-radius:8px;overflow:hidden}.un button{border:0;background:#fff;color:var(--g);padding:5px 10px;font-size:13px;font-weight:600}.un button.on{background:var(--g);color:#fff}
 .wa{display:inline-block;margin-top:14px;background:#25d366;color:#fff;text-decoration:none;padding:14px 22px;border-radius:10px;font-weight:600}
 </style></head><body>
 <header><h1>Order ke __BIZ__</h1><p>Halo, <b>__NAMA__</b> — pilih barang & jumlahnya, lalu kirim.</p></header>
@@ -47,18 +48,22 @@ const D=__DATA__;const qty={};const rp=n=>'Rp'+Math.round(n).toLocaleString('id-
 const m=document.getElementById('m');
 const cats={};D.items.forEach(i=>{(cats[i.kategori||'Lainnya']=cats[i.kategori||'Lainnya']||[]).push(i)});
 let h='';Object.keys(cats).forEach(c=>{h+='<h2>'+esc(c)+'</h2><div class="card">';cats[c].forEach(i=>{
-h+='<div class="it"><div class="n"><b>'+esc(i.nama)+'</b><span>'+rp(i.harga)+' / '+esc(i.satuan)+'</span></div><div class="q"><button data-c="'+esc(i.code)+'" data-d="-1">−</button><input inputmode="decimal" id="q_'+esc(i.code)+'" value="0" data-c="'+esc(i.code)+'"><button data-c="'+esc(i.code)+'" data-d="1">+</button></div></div>'});h+='</div>'});
+h+='<div class="it"><div class="n"><b>'+esc(i.nama)+'</b><span id="hp_'+esc(i.code)+'">'+rp(i.harga)+' / '+esc(i.satuan)+'</span>'+(i.isi_bal>0?'<div class="un" data-u="'+esc(i.code)+'"><button class="on" data-unit="sat" data-k="'+esc(i.code)+'">'+esc(i.satuan||'Pak')+'</button><button data-unit="bal" data-k="'+esc(i.code)+'">Bal ('+i.isi_bal+' '+esc(i.satuan||'pak').toLowerCase()+')</button></div>':'')+'</div><div class="q"><button data-c="'+esc(i.code)+'" data-d="-1">−</button><input inputmode="decimal" id="q_'+esc(i.code)+'" value="0" data-c="'+esc(i.code)+'"><button data-c="'+esc(i.code)+'" data-d="1">+</button></div></div>'});h+='</div>'});
 h+='<h2>Pengiriman</h2><div class="card" style="padding:12px">'+((D.tujuan||[]).length>1?'<label style="margin-top:0">Kirim ke</label>'+D.tujuan.map((t,i)=>'<label class="tj"><input type="radio" name="tj" value="'+i+'"'+(i==0?' checked':'')+'><span><b>'+esc(t.nama)+'</b>'+(t.alamat?'<br><small>📍 '+esc(t.alamat)+'</small>':'')+'</span></label>').join(''):'')+'<label'+((D.tujuan||[]).length>1?'':' style="margin-top:0"')+'>Tanggal kirim</label><input type="date" id="tgl"><label>No. PO Anda (kalau ada)</label><input type="text" id="po"><label>Catatan</label><textarea id="cat" rows="2"></textarea></div>';
 m.innerHTML=h;
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 const P={};D.items.forEach(i=>P[i.code]=i);
-function upd(){let t=0,n=0;for(const c in qty){if(qty[c]>0){t+=qty[c]*P[c].harga;n++}}
+const U={};const kali=c=>U[c]=='bal'?P[c].isi_bal:1;
+function upd(){let t=0,n=0;for(const c in qty){if(qty[c]>0){t+=qty[c]*kali(c)*P[c].harga;n++}}
 document.getElementById('cnt').textContent=n+' item';document.getElementById('tot').textContent=rp(t);document.getElementById('go').disabled=n==0}
-m.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;const c=b.dataset.c,d=+b.dataset.d;
+m.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
+if(b.dataset.unit){const k=b.dataset.k;U[k]=b.dataset.unit;b.parentNode.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+document.getElementById('hp_'+k).textContent=U[k]=='bal'?rp(P[k].harga*P[k].isi_bal)+' / bal ('+P[k].isi_bal+' '+String(P[k].satuan||'pak').toLowerCase()+')':rp(P[k].harga)+' / '+P[k].satuan;upd();return}
+const c=b.dataset.c,d=+b.dataset.d;
 qty[c]=Math.max(0,(qty[c]||0)+d);document.getElementById('q_'+c).value=qty[c];upd()});
 m.addEventListener('input',e=>{const c=e.target.dataset.c;if(!c)return;let v=parseFloat(String(e.target.value).replace(',','.'));qty[c]=isFinite(v)&&v>0?v:0;upd()});
 document.getElementById('go').onclick=async()=>{const b=document.getElementById('go');b.disabled=true;b.textContent='Mengirim...';
-const items=Object.keys(qty).filter(c=>qty[c]>0).map(c=>({code:c,qty:qty[c]}));
+const items=Object.keys(qty).filter(c=>qty[c]>0).map(c=>({code:c,qty:qty[c],unit:U[c]=='bal'?'bal':''}));
 try{const r=await fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items,tujuan:+((document.querySelector('input[name=tj]:checked')||{}).value||0),tanggal_kirim:document.getElementById('tgl').value,no_po:document.getElementById('po').value,catatan:document.getElementById('cat').value})});
 const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.error||'Gagal');
 document.getElementById('bar').remove();
@@ -125,6 +130,14 @@ def _boleh_lihat(row, nama_customer, rows=None, khusus_harga=None):
     return True
 
 
+def _isi_bal(row):
+    """Isi 1 bal (dalam satuan jual). Kolom Isi_Bal di PriceList; plastik sampah default 25 pak."""
+    v = _num(row.get("Isi_Bal"))
+    if v > 0:
+        return v
+    return float(getattr(config, "ISI_BAL_KATEGORI", {}).get(str(row.get("Kategori", "")).strip().upper(), 0))
+
+
 def _num(v):
     try:
         return float(v)
@@ -156,7 +169,7 @@ def make_web_app(sheets_getter, on_order, on_staff_event=None):
             if harga <= 0:
                 continue
             items.append({"code": code, "nama": _item_label(r), "kategori": r.get("Kategori", ""),
-                          "satuan": r.get("Satuan", ""), "harga": harga})
+                          "satuan": r.get("Satuan", ""), "harga": harga, "isi_bal": _isi_bal(r)})
         tujuan = await asyncio.to_thread(_daftar_tujuan, sheets, link)
         data = json.dumps({"items": items, "tujuan": tujuan}).replace("</", "<\\/")
         page = (PAGE.replace("__DATA__", data)
@@ -182,11 +195,15 @@ def make_web_app(sheets_getter, on_order, on_staff_event=None):
             pmap = await asyncio.to_thread(sheets.get_price_map)
             semua = await asyncio.to_thread(sheets.get_price_list)
             khusus = await asyncio.to_thread(sheets.get_harga_customer, str(link.get("Nama_Customer", "")))
-            items, total = [], 0.0
+            items, total, catatan_bal = [], 0.0, []
             for it in req:
                 code = str(it.get("code", "")).strip().upper()
                 qty = _num(it.get("qty"))
                 row = pmap.get(code)
+                bal = 0.0
+                if row is not None and str(it.get("unit", "")) == "bal" and _isi_bal(row) > 0:
+                    bal = qty
+                    qty = qty * _isi_bal(row)
                 if row is None or qty <= 0 or qty > 100000 or not _boleh_lihat(row, str(link.get("Nama_Customer", "")), semua, khusus):
                     continue
                 harga = khusus.get(code, _num(row.get("Harga_Jual")))
@@ -196,6 +213,8 @@ def make_web_app(sheets_getter, on_order, on_staff_event=None):
                 items.append({"item_code": row["Item_Code"], "nama_item": _item_label(row),
                               "kategori": row.get("Kategori", ""), "satuan": row.get("Satuan", ""),
                               "harga_satuan": harga, "qty": qty})
+                if bal:
+                    catatan_bal.append(f"{bal:g} bal {_item_label(row)}")
             if not items:
                 return web.json_response({"ok": False, "error": "Barang tidak valid"}, status=400)
             nama = str(link.get("Nama_Customer", ""))
@@ -216,7 +235,9 @@ def make_web_app(sheets_getter, on_order, on_staff_event=None):
                 "alamat": alamat, "metode": "Kirim", "items": items, "ongkir": 0, "cabang": cabang,
                 "no_po_customer": str(body.get("no_po", ""))[:60],
                 "tanggal_kirim": str(body.get("tanggal_kirim", ""))[:10],
-                "catatan": str(body.get("catatan", ""))[:300], "_web": True,
+                "catatan": (str(body.get("catatan", ""))[:300]
+                            + ((" | " if str(body.get("catatan", "")).strip() else "") + "Order per bal: " + ", ".join(catatan_bal) if catatan_bal else "")),
+                "_web": True,
             }
             pid = "W" + uuid.uuid4().hex[:6].upper()
             await asyncio.to_thread(sheets.add_pesanan_web, pid, nama, json.dumps(parsed, ensure_ascii=False))

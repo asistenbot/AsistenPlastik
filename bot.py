@@ -872,7 +872,7 @@ async def _kirim_surat_jalan(update, context, no_invoice):
         no_po_customer=first.get("No_PO_Customer", ""),
         tanggal_kirim=first.get("Tanggal_Kirim", ""),
         tanggal=first.get("Timestamp", ""),
-        catatan=str(first.get("Catatan", "") or ""),
+        catatan=__import__("docbuild").catatan_sj(first),
     )
     await _kirim_dotmatrix(update, f"Surat Jalan {no_sj}", no_sj, pages, txt, pdf, kunci="suratjalan")
 
@@ -2232,7 +2232,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parsed.get("metode", "Kirim"), parsed["items"], ongkir=parsed.get("ongkir", 0) or 0,
             no_po_customer=parsed.get("no_po_customer", "") or "",
             tanggal_kirim=parsed.get("tanggal_kirim", "") or "",
-            tanggal_order=_valid_tanggal_order(parsed.get("tanggal_order")),
+            tanggal_order=_valid_tanggal_order(parsed.get("tanggal_order"))
+            or (_valid_tanggal_order(parsed.get("tanggal_kirim")) if parsed.get("_web") else ""),
+            catatan_sj=(str(parsed.get("catatan", "") or "").strip() if parsed.get("_web") else ""),
         )
         context.user_data["last_invoice"] = no_invoice
         wo_pid = context.user_data.pop("_wo_pid", None)

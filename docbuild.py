@@ -22,6 +22,8 @@ def _hasil(sheets, no_invoice, kind):
     first = rows[0]
     common = dict(no_po_customer=first.get("No_PO_Customer", ""), tanggal_kirim=first.get("Tanggal_Kirim", ""),
                   tanggal=first.get("Timestamp", ""), catatan=str(first.get("Catatan", "") or ""))
+    if kind != "inv":
+        common["catatan"] = catatan_sj(first)
     if kind == "inv":
         items = [{"nama_item": r["Nama_Item"], "qty": r["Qty"], "satuan": r["Satuan"],
                   "harga_satuan": r["Harga_Satuan"]} for r in rows]
@@ -64,6 +66,12 @@ def bangun_txt(sheets, no_invoice, kind):
     return f"{nama}.txt", ("\r\n".join(out) + "\r\n").encode("ascii")
 
 
+def catatan_sj(first):
+    """Catatan buat surat jalan = Catatan (invoice & SJ) + Catatan_SJ (cuma SJ, mis. catatan customer dari web)."""
+    return " | ".join(x for x in (str(first.get("Catatan", "") or "").strip(),
+                                  str(first.get("Catatan_SJ", "") or "").strip()) if x)
+
+
 def bangun_pdf(sheets, no_invoice, kind):
     """kind: 'inv' | 'sj'. Balikin (nama_file, bytes) atau None kalau invoice gak ada."""
     rows = sheets.get_order_items(no_invoice)
@@ -72,6 +80,8 @@ def bangun_pdf(sheets, no_invoice, kind):
     first = rows[0]
     common = dict(no_po_customer=first.get("No_PO_Customer", ""), tanggal_kirim=first.get("Tanggal_Kirim", ""),
                   tanggal=first.get("Timestamp", ""), catatan=str(first.get("Catatan", "") or ""))
+    if kind != "inv":
+        common["catatan"] = catatan_sj(first)
     if kind == "inv":
         items = [{"nama_item": r["Nama_Item"], "qty": r["Qty"], "satuan": r["Satuan"],
                   "harga_satuan": r["Harga_Satuan"]} for r in rows]

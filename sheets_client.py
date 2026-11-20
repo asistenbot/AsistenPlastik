@@ -43,7 +43,7 @@ SCHEMA = {
         "Timestamp", "No_Invoice", "Nama_Customer", "No_HP", "Alamat",
         "Metode", "Item_Code", "Nama_Item", "Kategori", "Qty", "Satuan",
         "Harga_Satuan", "Subtotal", "Ongkir", "Status", "Tanggal_Bayar",
-        "No_PO_Customer", "Tanggal_Kirim", "Catatan",
+        "No_PO_Customer", "Tanggal_Kirim", "Catatan", "Catatan_SJ",
     ],
     config.SHEET_SUPPLIERS: ["Nama_Supplier", "No_HP", "Barang", "Alamat"],
     config.SHEET_PURCHASE_ORDERS: [
@@ -746,7 +746,7 @@ class SheetsClient:
         return self._records(self._ws(config.SHEET_ORDERS))
 
     def add_order(self, nama_customer, no_hp, alamat, metode, items, ongkir=0,
-                  no_po_customer="", tanggal_kirim="", tanggal_order="", catatan=""):
+                  no_po_customer="", tanggal_kirim="", tanggal_order="", catatan="", catatan_sj=""):
         """items: list of dict {item_code, nama_item, kategori, qty, satuan,
         harga_satuan}. Nulis 1 baris per item, semuanya share No_Invoice yang
         sama. no_po_customer/tanggal_kirim opsional (referensi No. PO dari
@@ -776,6 +776,7 @@ class SheetsClient:
                     "Pending", "",
                     no_po_customer, tanggal_kirim,
                     (catatan or "") if idx == 0 else "",
+                    (catatan_sj or "") if idx == 0 else "",
                 ])
             ws.append_rows(rows, value_input_option="RAW")
             self.add_customer_if_new(nama_customer, no_hp, alamat)
